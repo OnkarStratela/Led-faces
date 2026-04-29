@@ -47,11 +47,14 @@ sudo pip3 install rpi_ws281x
 
 ```
 [RFID] TAG DETECTED: E20000172211010418905449 (RSSI: -512 dBm) [Source_0] [2026-04-29 14:32:45]
+[LED-RFID] >>> Total unique tags scanned: 1
 ```
 
-Every line like the one above corresponds to a **new unique tag**, and at the
-same instant the entire LED strip lights up **green** (`#00FF00`) for ~2
-seconds. The strip turns off again after the hold period.
+The LED strip stays a steady **white** (`#FFFFFF`) while idle. Every line like
+the one above corresponds to a **new unique tag**, and at that instant the
+strip fires a fast burst of **green** (`#00FF00`) flashes (4 quick blinks by
+default) before snapping back to white. A running count of unique tags is
+printed alongside each detection.
 
 Press **Ctrl+C** to stop. The bridge sends `SIGINT` to the C reader, waits for
 it to disconnect cleanly, then turns the LEDs off (`#000000`).
@@ -60,7 +63,8 @@ it to disconnect cleanly, then turns the LEDs off (`#000000`).
 
 - LED count / pin / brightness: edit the `LED_*` constants at the top of
   `rfid_led.py`.
-- Green hold time: change `GREEN_HOLD_SECONDS` in `rfid_led.py`.
+- Blink burst: tune `BLINK_COUNT`, `BLINK_ON_SECONDS`, and `BLINK_OFF_SECONDS`
+  in `rfid_led.py`.
 - RFID power and RSSI threshold: edit `power` and `RSSI_THRESHOLD` in
   `rfid_reader.c`, then re-run `./compile.sh` (or just `./system.sh`).
 
