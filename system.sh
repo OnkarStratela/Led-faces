@@ -49,24 +49,6 @@ fi
 
 echo -e "${GREEN}All required CAEN files found in SRC folder!${NC}"
 
-# Make sure the aux-LED systemd service is installed + running so the GPIO13
-# white LED is on at every boot. The install script is idempotent: if the
-# service is already enabled and active, this is a fast no-op; otherwise it
-# installs python3-gpiozero (if missing), copies the unit file, enables it,
-# and starts it.
-echo -e "${YELLOW}Ensuring aux-LED service is installed...${NC}"
-if systemctl is-active --quiet aux-led.service 2>/dev/null \
-   && systemctl is-enabled --quiet aux-led.service 2>/dev/null; then
-    echo -e "${GREEN}aux-led.service already active and enabled.${NC}"
-else
-    if [ -x ./install_aux_led.sh ]; then
-        ./install_aux_led.sh
-    else
-        chmod +x install_aux_led.sh 2>/dev/null && ./install_aux_led.sh \
-            || echo -e "${YELLOW}Skipping aux-LED install (install_aux_led.sh not runnable).${NC}"
-    fi
-fi
-
 # Check USB device permissions
 echo -e "${YELLOW}Checking USB device access...${NC}"
 if [ -e /dev/ttyACM0 ] || [ -e /dev/ttyUSB0 ]; then
