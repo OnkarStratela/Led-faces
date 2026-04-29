@@ -1,14 +1,16 @@
-"""Standalone rainbow animation for the WS2812 strip.
+"""Standalone green-flow animation for the WS2812 strip.
 
-Plays a smoothly-flowing rainbow across all LEDs, forever, until you press
-Ctrl+C. Has nothing to do with the RFID reader — just a fun toy script.
+A green wave starts at each end of the strip and flows toward the center.
+The two waves meet in the middle, briefly hold, fade out, and the cycle
+repeats — forever, until you press Ctrl+C.
+
+Has nothing to do with the RFID reader; just a fun toy script.
 
 Run on the Pi:
 
-    sudo python3 rainbow.py            # default speed
-    sudo python3 rainbow.py --speed 8  # faster flow
-    sudo python3 rainbow.py --mode solid   # whole strip pulses one colour
-    sudo python3 rainbow.py --mode chase   # rainbow flows along the strip (default)
+    sudo python3 rainbow.py             # default speed
+    sudo python3 rainbow.py --speed 10  # faster
+    sudo python3 rainbow.py --speed 2   # slower / chill
 
 Press Ctrl+C to stop — the strip turns off cleanly.
 
@@ -33,17 +35,14 @@ LED_INVERT     = False
 LED_CHANNEL    = 0
 # ────────────────────────────────────────────────────────────
 
+# How bright each wave's head LED is (0..255), and how many LEDs trail
+# behind it (the comet tail). The tail fades linearly from peak → 0.
+GREEN_PEAK = 255
+TRAIL_LEN  = 5
 
-def wheel(pos: int) -> int:
-    """Map 0..255 to a rainbow colour (R → G → B → R)."""
-    pos = pos & 255
-    if pos < 85:
-        return Color(pos * 3, 255 - pos * 3, 0)
-    if pos < 170:
-        pos -= 85
-        return Color(255 - pos * 3, 0, pos * 3)
-    pos -= 170
-    return Color(0, pos * 3, 255 - pos * 3)
+# Number of fade-out frames after the waves meet at the center, before the
+# cycle restarts. Larger = longer hold + slower fade.
+FADE_STEPS = 8
 
 
 def fill_off(strip: PixelStrip) -> None:
@@ -52,43 +51,56 @@ def fill_off(strip: PixelStrip) -> None:
     strip.show()
 
 
-def rainbow_chase(strip: PixelStrip, speed: int) -> None:
-    """Each LED gets its own hue, and the whole pattern slides along the
-    strip — looks like a flowing rainbow ribbon."""
-    delay = max(1, 30 - speed * 2) / 1000.0  # speed 1 → 28 ms, speed 14 → 2 ms
-    j = 0
-    while True:
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(
-                i,
-                wheel((int(i * 256 / strip.numPixels()) + j) & 255),
-            )
-        strip.show()
-        time.sleep(delay)
-        j = (j + 1) & 255
+def render_frame(strip: PixelStrip, head: int, fade: float = 1.0) -> None:
+    """Draw a single frame.
+
+    `head` is the index of the LEFT wave's head (it advances 0 → center).
+    The right wave is mirrored so its head is at `N - 1 - head`.
+
+    For each LED we compute its distance behind the nearer wave head; LEDs
+    closer to a head are brighter, LEDs further back are dimmer. LEDs in
+    front of both heads (the "untouched" middle gap) stay off.
+
+    `fade` (0..1) globally scales brightness — used to fade the meeting
+    pulse out at the end of each cycle.
+    """
+    n = strip.numPixels()
+    right_head = n - 1 - head
+    big = 10 ** 6  # sentinel: "this LED is in front of this head, ignore"
+    for i in range(n):
+        d_left  = head - i       if i <= head       else big
+        d_right = i - right_head if i >= right_head else big
+        d = min(d_left, d_right)
+        if d <= TRAIL_LEN:
+            g = int(GREEN_PEAK * (1.0 - d / (TRAIL_LEN + 1)) * fade)
+            if g < 0:
+                g = 0
+            strip.setPixelColor(i, Color(0, g, 0))
+        else:
+            strip.setPixelColor(i, Color(0, 0, 0))
+    strip.show()
 
 
-def rainbow_solid(strip: PixelStrip, speed: int) -> None:
-    """Whole strip pulses through the rainbow, all LEDs the same colour at
-    any moment."""
-    delay = max(1, 30 - speed * 2) / 1000.0
-    j = 0
+def green_flow(strip: PixelStrip, speed: int) -> None:
+    """Endless animation: waves converge from both ends → fade → repeat."""
+    n = strip.numPixels()
+    half = (n + 1) // 2          # frames for a head to reach the centre
+    delay = max(1, 30 - speed * 2) / 1000.0   # speed 1 → 28 ms, 14 → 2 ms
+
     while True:
-        c = wheel(j & 255)
-        for i in range(strip.numPixels()):
-            strip.setPixelColor(i, c)
-        strip.show()
-        time.sleep(delay)
-        j = (j + 1) & 255
+        # Phase 1: heads advance, one LED per frame, toward the centre.
+        for head in range(half):
+            render_frame(strip, head)
+            time.sleep(delay)
+        # Phase 2: hold + fade after the waves meet at the centre.
+        for k in range(FADE_STEPS):
+            render_frame(strip, half - 1, fade=1.0 - (k + 1) / FADE_STEPS)
+            time.sleep(delay)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="WS2812 rainbow toy.")
-    parser.add_argument(
-        "--mode",
-        choices=("chase", "solid"),
-        default="chase",
-        help="chase = flowing rainbow ribbon (default); solid = whole strip pulses one colour at a time",
+    parser = argparse.ArgumentParser(
+        description="WS2812 green-flow toy: waves converge from both ends.",
     )
     parser.add_argument(
         "--speed",
@@ -105,19 +117,16 @@ def main() -> int:
     strip.begin()
 
     def shutdown(*_args) -> None:
-        print("\n[Rainbow] Stopping, turning LEDs off...")
+        print("\n[GreenFlow] Stopping, turning LEDs off...")
         fill_off(strip)
         sys.exit(0)
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    print(f"[Rainbow] mode={args.mode} speed={args.speed} — Ctrl+C to stop")
+    print(f"[GreenFlow] speed={args.speed} — Ctrl+C to stop")
     try:
-        if args.mode == "chase":
-            rainbow_chase(strip, args.speed)
-        else:
-            rainbow_solid(strip, args.speed)
+        green_flow(strip, args.speed)
     finally:
         fill_off(strip)
     return 0
