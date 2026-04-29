@@ -1,24 +1,27 @@
-"""Bridge between the CAEN RFID reader (rfid_reader.c) and the WS2812 LED strip.
+"""Bridge between the CAEN RFID reader (rfid_reader.c) and the LEDs.
 
-Behaviour
----------
-* Idle (no tags being scanned): the WS2812 strip is solid WHITE.
-* Every NEW unique tag reported by `rfid_reader` produces ONE visible green
-  blink:
-      - a very short WHITE "off-pulse" (so back-to-back blinks are visually
-        distinct from one continuous green pulse),
-      - then GREEN for `GREEN_HOLD_SECONDS` seconds,
-      - then back to WHITE.
-* If another new tag arrives while the strip is still green, the current green
-  pulse is cut short and a fresh blink starts. That way, scanning N unique
-  containers in quick succession produces N distinct green blinks — a visual
-  counter for the operator.
-* Every tag line also prints "[LED-RFID] Tags scanned: N" so the running total
-  is visible in the terminal.
-* Independently of the WS2812 strip, an auxiliary single white LED wired to
-  GPIO13 on the carrier board is driven with software PWM (via gpiozero) so
-  its brightness is configurable. It is turned ON at WHITE_LED_BRIGHTNESS the
-  moment the script starts, and OFF on shutdown.
+This single script drives both LED outputs of the system:
+
+1. **WS2812 strip on GPIO12 (PWM0)** — visual feedback for tag scans.
+   * Idle (no tags being scanned): the strip is solid WHITE.
+   * Every NEW unique tag reported by `rfid_reader` produces ONE visible green
+     blink:
+         - a very short WHITE "off-pulse" (so back-to-back blinks are
+           visually distinct from one continuous green pulse),
+         - then GREEN for `GREEN_HOLD_SECONDS` seconds,
+         - then back to WHITE.
+   * If another new tag arrives while the strip is still green, the current
+     green pulse is cut short and a fresh blink starts. That way, scanning N
+     unique containers in quick succession produces N distinct green blinks
+     — a visual counter for the operator.
+   * Every tag line prints "[LED-RFID] Tags scanned: N" so the running total
+     is visible in the terminal.
+
+2. **Aux white LED on GPIO13 (PWM1)** — simple "system is up" indicator.
+   * Comes on the moment this script starts (at the brightness configured
+     by `AUX_LED_BRIGHTNESS`) and stays on until the script exits.
+   * If `gpiozero` is missing, the aux LED is skipped silently — the rest
+     of the script (RFID + WS2812) keeps working.
 """
 
 import os
@@ -31,9 +34,14 @@ import threading
 import time
 
 from rpi_ws281x import PixelStrip, Color
-from gpiozero import PWMLED
 
-# ── WS2812 LED strip configuration (same as ../leds_on.py) ─
+try:
+    from gpiozero import PWMLED
+    _GPIOZERO_AVAILABLE = True
+except Exception:  # ImportError, or any backend failure on non-Pi hardware
+    _GPIOZERO_AVAILABLE = False
+
+# ── WS2812 LED-strip configuration ─────────────────────────
 LED_COUNT      = 19          # Number of LEDs on the strip
 LED_PIN        = 12          # GPIO12 (PWM0)
 LED_FREQ_HZ    = 600000      # WS2812 signal frequency
@@ -43,14 +51,9 @@ LED_INVERT     = False
 LED_CHANNEL    = 0
 # ────────────────────────────────────────────────────────────
 
-# ── Auxiliary white LED on GPIO13 ──────────────────────────
-# A single white LED wired to GPIO13 on the carrier board (independent of
-# the WS2812 strip). It is driven with SOFTWARE PWM via gpiozero.PWMLED, so
-# it does not fight the rpi_ws281x library for the hardware PWM/DMA
-# peripheral that is busy driving GPIO12. It turns on at WHITE_LED_BRIGHTNESS
-# the moment this script starts and turns off cleanly on shutdown.
-WHITE_LED_PIN        = 13    # GPIO13 (BCM)
-WHITE_LED_BRIGHTNESS = 200   # 0 (off) to 255 (full brightness)
+# ── Aux white LED (simple VCC/GND LED on a PWM-capable pin) ─
+AUX_LED_PIN        = 13      # GPIO13 (PWM1) — must NOT clash with LED_PIN
+AUX_LED_BRIGHTNESS = 225     # 0 (off) to 255 (full brightness)
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
@@ -97,14 +100,26 @@ def main() -> int:
     )
     strip.begin()
 
-    # Auxiliary white LED on GPIO13 — turn it on at the configured brightness
-    # straight away so the carrier-board light comes up with the script.
-    white_brightness = max(0, min(255, WHITE_LED_BRIGHTNESS)) / 255.0
-    white_led = PWMLED(WHITE_LED_PIN)
-    white_led.value = white_brightness
-    print(f"[LED-RFID] Aux white LED on GPIO{WHITE_LED_PIN} "
-          f"set to {WHITE_LED_BRIGHTNESS}/255 "
-          f"(~{int(white_brightness * 100)}%)")
+    # Aux white LED on AUX_LED_PIN — simple "system is up" indicator.
+    # Held on at AUX_LED_BRIGHTNESS via software PWM (gpiozero), so it does
+    # not contend with the DMA-driven PWM0 used by the WS2812 strip above.
+    aux_led = None
+    if _GPIOZERO_AVAILABLE:
+        try:
+            aux_led = PWMLED(AUX_LED_PIN)
+            aux_led.value = max(0.0, min(1.0, AUX_LED_BRIGHTNESS / 255.0))
+            print(
+                f"[LED-RFID] Aux white LED on GPIO{AUX_LED_PIN} held at "
+                f"{AUX_LED_BRIGHTNESS}/255 brightness."
+            )
+        except Exception as e:
+            print(f"[LED-RFID] Could not initialise aux LED on GPIO{AUX_LED_PIN}: {e}")
+            aux_led = None
+    else:
+        print(
+            "[LED-RFID] gpiozero not available; skipping aux LED on "
+            f"GPIO{AUX_LED_PIN}. Install with: sudo apt install python3-gpiozero"
+        )
 
     GREEN = hex_to_color(GREEN_HEX)
     WHITE = hex_to_color(WHITE_HEX)
@@ -189,11 +204,12 @@ def main() -> int:
                 proc.kill()
         led_thread.join(timeout=2)
         fill_strip(strip, OFF)
-        try:
-            white_led.off()
-            white_led.close()
-        except Exception:
-            pass
+        if aux_led is not None:
+            try:
+                aux_led.off()
+                aux_led.close()
+            except Exception:
+                pass
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
