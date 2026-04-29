@@ -53,7 +53,7 @@ LED_CHANNEL    = 0
 
 # ── Aux white LED (simple VCC/GND LED on a PWM-capable pin) ─
 AUX_LED_PIN        = 13      # GPIO13 (PWM1) — must NOT clash with LED_PIN
-AUX_LED_BRIGHTNESS = 225     # 0 (off) to 255 (full brightness)
+AUX_LED_BRIGHTNESS = 100     # 0 (off) to 255 (full brightness)
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
