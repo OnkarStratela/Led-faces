@@ -18,11 +18,11 @@ import time
 from rpi_ws281x import PixelStrip, Color
 
 # ── LED configuration (same as ../leds_on.py) ──────────────
-LED_COUNT      = 18          # Number of LEDs on the strip
+LED_COUNT      = 19          # Number of LEDs on the strip
 LED_PIN        = 12          # GPIO12 (PWM0)
-LED_FREQ_HZ    = 800000      # WS2812 signal frequency
+LED_FREQ_HZ    = 600000      # WS2812 signal frequency
 LED_DMA        = 10          # DMA channel
-LED_BRIGHTNESS = 100         # 0 (off) to 255 (full brightness)
+LED_BRIGHTNESS = 225         # 0 (off) to 255 (full brightness)
 LED_INVERT     = False
 LED_CHANNEL    = 0
 # ────────────────────────────────────────────────────────────
