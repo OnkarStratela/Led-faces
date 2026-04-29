@@ -15,6 +15,9 @@ operator gets a visual count of containers as they're scanned.
 | `rfid_led.py`       | Python bridge: launches the `rfid_reader` binary, parses its stdout, holds the WS2812 strip white while idle, and blinks it green for 1 s on every new unique tag. |
 | `system.sh`         | One-shot runner: checks the `SRC/` library, compiles, and launches `rfid_led.py` (with `sudo` so the LED PWM/DMA can be accessed). |
 | `rainbow.py`        | Standalone fun script — strip glows dim white; bright green waves with long fading tails flow inward from both ends, meet at the centre, and melt back into the dim white (LEDs never go dark). Independent of the RFID stack. Run with `sudo python3 rainbow.py`. |
+| `aux_led.py`        | Drives a simple white LED on **GPIO13 (PWM1)** at full brightness via PWM. Designed to be launched by `aux-led.service`. |
+| `aux-led.service`   | systemd unit that starts `aux_led.py` automatically at boot and restarts it on failure. Installed by `install_aux_led.sh`. |
+| `install_aux_led.sh`| One-shot installer: copies / enables `aux-led.service` so the GPIO13 LED turns on on every boot. Run with `./install_aux_led.sh`; uninstall with `./install_aux_led.sh uninstall`. |
 | `SRC/`              | CAEN RFID Light library sources/headers (do not modify). |
 
 ## Hardware
@@ -23,9 +26,6 @@ operator gets a visual count of containers as they're scanned.
 - CAEN R3100C-Lepton3 25 dBm RFID reader on `/dev/ttyACM0` (USB)
 - 2× UHF antennas on `Source_0` and `Source_1`
 - WS2812 LED strip on **GPIO12 (PWM0)**, 19 LEDs (configured in `rfid_led.py`)
-- Single white indicator LED on **GPIO13** (carrier board) — turns on as soon
-  as `rfid_led.py` starts, brightness configurable via `WHITE_LED_BRIGHTNESS`
-  in `rfid_led.py` (0..255 scale, default 200)
 
 ## Build & Run
 
@@ -33,9 +33,8 @@ operator gets a visual count of containers as they're scanned.
 # 1. Make scripts executable (first time only)
 chmod +x compile.sh system.sh
 
-# 2. Make sure the Python LED libraries are installed on the Pi
+# 2. Make sure the Python LED library is installed on the Pi
 sudo pip3 install rpi_ws281x
-sudo apt install -y python3-gpiozero    # for the GPIO13 white indicator LED
 
 # 3. Run everything
 ./system.sh
