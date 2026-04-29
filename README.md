@@ -14,7 +14,7 @@ operator gets a visual count of containers as they're scanned.
 | `compile.sh`        | Builds `rfid_reader` from `rfid_reader.c` + the `SRC/` CAEN light library. |
 | `rfid_led.py`       | Python bridge: launches the `rfid_reader` binary, parses its stdout, holds the WS2812 strip white while idle, and blinks it green for 1 s on every new unique tag. |
 | `system.sh`         | One-shot runner: checks the `SRC/` library, compiles, and launches `rfid_led.py` (with `sudo` so the LED PWM/DMA can be accessed). |
-| `rainbow.py`        | Standalone fun script — green waves flow inward from both ends of the LED strip and meet at the centre. Independent of the RFID stack. Run with `sudo python3 rainbow.py`. |
+| `rainbow.py`        | Standalone fun script — strip is solid white; green waves flow inward from both ends, meet at the centre, and fade back into white (LEDs never go dark). Independent of the RFID stack. Run with `sudo python3 rainbow.py`. |
 | `SRC/`              | CAEN RFID Light library sources/headers (do not modify). |
 
 ## Hardware

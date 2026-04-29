@@ -1,8 +1,10 @@
-"""Standalone green-flow animation for the WS2812 strip.
+"""Standalone green-on-white flow animation for the WS2812 strip.
 
-A green wave starts at each end of the strip and flows toward the center.
-The two waves meet in the middle, briefly hold, fade out, and the cycle
-repeats — forever, until you press Ctrl+C.
+The whole strip stays solid white at all times. A green wave starts at each
+end and flows toward the centre; behind each wave head a short green tail
+fades smoothly back into the white background. When the two waves meet at
+the centre, the green fades back into white and the cycle repeats — the
+LEDs never go dark.
 
 Has nothing to do with the RFID reader; just a fun toy script.
 
@@ -15,7 +17,8 @@ Run on the Pi:
 Press Ctrl+C to stop — the strip turns off cleanly.
 
 LED constants are kept in sync with rfid_led.py so it Just Works on the same
-hardware.
+hardware. (Note: with all 19 LEDs on white, current draw is higher than the
+old all-off animation — make sure your 5 V supply can handle ~1 A.)
 """
 
 import argparse
@@ -46,23 +49,33 @@ FADE_STEPS = 8
 
 
 def fill_off(strip: PixelStrip) -> None:
+    """Turn the strip fully off (used on shutdown)."""
     for i in range(strip.numPixels()):
         strip.setPixelColor(i, Color(0, 0, 0))
+    strip.show()
+
+
+def fill_white(strip: PixelStrip) -> None:
+    """Solid white background — the idle / between-waves state."""
+    for i in range(strip.numPixels()):
+        strip.setPixelColor(i, Color(255, 255, 255))
     strip.show()
 
 
 def render_frame(strip: PixelStrip, head: int, fade: float = 1.0) -> None:
     """Draw a single frame.
 
-    `head` is the index of the LEFT wave's head (it advances 0 → center).
-    The right wave is mirrored so its head is at `N - 1 - head`.
+    Background is always white. The two wave heads (left at `head`, right
+    mirrored at `N - 1 - head`) appear as pure green over that white, and
+    each head trails a short fade back into white.
 
-    For each LED we compute its distance behind the nearer wave head; LEDs
-    closer to a head are brighter, LEDs further back are dimmer. LEDs in
-    front of both heads (the "untouched" middle gap) stay off.
-
-    `fade` (0..1) globally scales brightness — used to fade the meeting
-    pulse out at the end of each cycle.
+    For every LED we compute distance `d` behind the nearer wave head and
+    derive an "intensity" t in [0..1]:
+        * t = 1 → fully green (R = B = 0)
+        * t = 0 → fully white (R = G = B = 255)
+        * in between, linearly blend white → green by reducing R and B
+    `fade` (0..1) scales t globally — used to fade the green back into
+    white after the waves meet at the centre.
     """
     n = strip.numPixels()
     right_head = n - 1 - head
@@ -72,30 +85,42 @@ def render_frame(strip: PixelStrip, head: int, fade: float = 1.0) -> None:
         d_right = i - right_head if i >= right_head else big
         d = min(d_left, d_right)
         if d <= TRAIL_LEN:
-            g = int(GREEN_PEAK * (1.0 - d / (TRAIL_LEN + 1)) * fade)
-            if g < 0:
-                g = 0
-            strip.setPixelColor(i, Color(0, g, 0))
+            t = (1.0 - d / (TRAIL_LEN + 1)) * fade
+            if t < 0.0:
+                t = 0.0
+            elif t > 1.0:
+                t = 1.0
         else:
-            strip.setPixelColor(i, Color(0, 0, 0))
+            t = 0.0
+        # white → green blend: reduce R and B as t grows, keep G at peak.
+        rb = int(255 * (1.0 - t))
+        g  = GREEN_PEAK
+        strip.setPixelColor(i, Color(rb, g, rb))
     strip.show()
 
 
 def green_flow(strip: PixelStrip, speed: int) -> None:
-    """Endless animation: waves converge from both ends → fade → repeat."""
+    """Endless animation: white background, with green waves converging
+    from both ends and fading back into white at the centre."""
     n = strip.numPixels()
     half = (n + 1) // 2          # frames for a head to reach the centre
     delay = max(1, 30 - speed * 2) / 1000.0   # speed 1 → 28 ms, 14 → 2 ms
+
+    # Start in the idle white state so the strip is visibly "on" right away.
+    fill_white(strip)
 
     while True:
         # Phase 1: heads advance, one LED per frame, toward the centre.
         for head in range(half):
             render_frame(strip, head)
             time.sleep(delay)
-        # Phase 2: hold + fade after the waves meet at the centre.
+        # Phase 2: green pulse at the centre fades back into solid white.
         for k in range(FADE_STEPS):
             render_frame(strip, half - 1, fade=1.0 - (k + 1) / FADE_STEPS)
             time.sleep(delay)
+        # Make sure we're at exactly solid white before the next wave starts
+        # (compensates for any rounding error in the fade above).
+        fill_white(strip)
 
 
 def main() -> int:
