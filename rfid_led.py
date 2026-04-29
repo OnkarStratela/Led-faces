@@ -2,7 +2,7 @@
 
 Behaviour
 ---------
-* Idle (no tags being scanned): the strip is solid WHITE.
+* Idle (no tags being scanned): the WS2812 strip is solid WHITE.
 * Every NEW unique tag reported by `rfid_reader` produces ONE visible green
   blink:
       - a very short WHITE "off-pulse" (so back-to-back blinks are visually
@@ -15,6 +15,10 @@ Behaviour
   counter for the operator.
 * Every tag line also prints "[LED-RFID] Tags scanned: N" so the running total
   is visible in the terminal.
+* Independently of the WS2812 strip, an auxiliary single white LED wired to
+  GPIO13 on the carrier board is driven with software PWM (via gpiozero) so
+  its brightness is configurable. It is turned ON at WHITE_LED_BRIGHTNESS the
+  moment the script starts, and OFF on shutdown.
 """
 
 import os
@@ -27,8 +31,9 @@ import threading
 import time
 
 from rpi_ws281x import PixelStrip, Color
+from gpiozero import PWMLED
 
-# ── WS2812 strip configuration (RGB strip on GPIO12 / PWM0) ─
+# ── WS2812 LED strip configuration (same as ../leds_on.py) ─
 LED_COUNT      = 19          # Number of LEDs on the strip
 LED_PIN        = 12          # GPIO12 (PWM0)
 LED_FREQ_HZ    = 600000      # WS2812 signal frequency
@@ -38,23 +43,14 @@ LED_INVERT     = False
 LED_CHANNEL    = 0
 # ────────────────────────────────────────────────────────────
 
-# ── Carrier-board white indicator LED (GPIO13) ──────────────
-# A simple, single white LED wired to GPIO13 on the carrier board. Driven
-# with software PWM via `gpiozero.PWMLED`, so it works on any GPIO pin and
-# does NOT conflict with the WS2812 strip on GPIO12.
-#
-# Lifecycle: turns on at WHITE_LED_BRIGHTNESS the moment this script starts,
-# stays on for the entire run, and turns off cleanly on Ctrl+C / shutdown.
-#
-# To change brightness, edit WHITE_LED_BRIGHTNESS below (same 0..255 scale
-# as LED_BRIGHTNESS above). Examples:
-#     WHITE_LED_BRIGHTNESS = 0    → fully off
-#     WHITE_LED_BRIGHTNESS = 64   → quarter brightness
-#     WHITE_LED_BRIGHTNESS = 128  → half brightness
-#     WHITE_LED_BRIGHTNESS = 255  → full brightness
-WHITE_LED_PIN        = 13   # BCM pin number
-WHITE_LED_BRIGHTNESS = 200  # 0 (off) to 255 (full brightness)
-WHITE_LED_PWM_HZ     = 200  # PWM frequency for the white LED, Hz
+# ── Auxiliary white LED on GPIO13 ──────────────────────────
+# A single white LED wired to GPIO13 on the carrier board (independent of
+# the WS2812 strip). It is driven with SOFTWARE PWM via gpiozero.PWMLED, so
+# it does not fight the rpi_ws281x library for the hardware PWM/DMA
+# peripheral that is busy driving GPIO12. It turns on at WHITE_LED_BRIGHTNESS
+# the moment this script starts and turns off cleanly on shutdown.
+WHITE_LED_PIN        = 13    # GPIO13 (BCM)
+WHITE_LED_BRIGHTNESS = 200   # 0 (off) to 255 (full brightness)
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
@@ -89,57 +85,26 @@ def fill_strip(strip: PixelStrip, color: int) -> None:
     strip.show()
 
 
-def setup_white_indicator():
-    """Bring up the carrier-board white LED on GPIO13 at WHITE_LED_BRIGHTNESS.
-
-    Returns the gpiozero.PWMLED object on success, or None if anything went
-    wrong (missing library, pin contention, etc.). A failure here is logged
-    but never aborts the RFID feedback — the WS2812 strip is the primary
-    function of this script.
-    """
-    if WHITE_LED_BRIGHTNESS <= 0:
-        print(f"[LED-RFID] White indicator LED disabled (WHITE_LED_BRIGHTNESS=0).")
-        return None
-    try:
-        from gpiozero import PWMLED
-    except Exception as exc:
-        print(f"[LED-RFID] WARNING: gpiozero not available, white LED disabled "
-              f"({exc}). Install with:  sudo apt install -y python3-gpiozero")
-        return None
-    try:
-        led = PWMLED(WHITE_LED_PIN, frequency=WHITE_LED_PWM_HZ)
-        # Clamp to [0.0, 1.0] just in case someone sets WHITE_LED_BRIGHTNESS
-        # outside 0..255.
-        v = WHITE_LED_BRIGHTNESS / 255.0
-        if v < 0.0:
-            v = 0.0
-        elif v > 1.0:
-            v = 1.0
-        led.value = v
-        print(f"[LED-RFID] White indicator LED on GPIO{WHITE_LED_PIN} "
-              f"set to {WHITE_LED_BRIGHTNESS}/255")
-        return led
-    except Exception as exc:
-        print(f"[LED-RFID] WARNING: could not enable white LED on "
-              f"GPIO{WHITE_LED_PIN}: {exc}")
-        return None
-
-
 def main() -> int:
     if not os.path.isfile(RFID_BINARY) or not os.access(RFID_BINARY, os.X_OK):
         print(f"[LED-RFID] ERROR: '{RFID_BINARY}' not found or not executable.")
         print("[LED-RFID] Build it first:  ./compile.sh")
         return 1
 
-    # Carrier-board indicator white LED on GPIO13 — comes on immediately and
-    # stays on for the entire run. None if it failed / is disabled.
-    white_led = setup_white_indicator()
-
     strip = PixelStrip(
         LED_COUNT, LED_PIN, LED_FREQ_HZ,
         LED_DMA, LED_INVERT, LED_BRIGHTNESS, LED_CHANNEL,
     )
     strip.begin()
+
+    # Auxiliary white LED on GPIO13 — turn it on at the configured brightness
+    # straight away so the carrier-board light comes up with the script.
+    white_brightness = max(0, min(255, WHITE_LED_BRIGHTNESS)) / 255.0
+    white_led = PWMLED(WHITE_LED_PIN)
+    white_led.value = white_brightness
+    print(f"[LED-RFID] Aux white LED on GPIO{WHITE_LED_PIN} "
+          f"set to {WHITE_LED_BRIGHTNESS}/255 "
+          f"(~{int(white_brightness * 100)}%)")
 
     GREEN = hex_to_color(GREEN_HEX)
     WHITE = hex_to_color(WHITE_HEX)
@@ -224,12 +189,11 @@ def main() -> int:
                 proc.kill()
         led_thread.join(timeout=2)
         fill_strip(strip, OFF)
-        if white_led is not None:
-            try:
-                white_led.value = 0.0
-                white_led.close()
-            except Exception:
-                pass
+        try:
+            white_led.off()
+            white_led.close()
+        except Exception:
+            pass
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
