@@ -1,11 +1,20 @@
 """Bridge between the CAEN RFID reader (rfid_reader.c) and the WS2812 LED strip.
 
-Runs the compiled `./rfid_reader` binary as a subprocess, mirrors every line of
-its output to the terminal, keeps the strip a steady WHITE while idle, and
-fires a fast burst of GREEN blinks each time a NEW unique tag is reported
-(rfid_reader.c already filters duplicates via its `seen_tags[]` table, so every
-"TAG DETECTED" line corresponds to a genuinely new tag). A running count of
-total unique tags is printed alongside each detection.
+Behaviour
+---------
+* Idle (no tags being scanned): the strip is solid WHITE.
+* Every NEW unique tag reported by `rfid_reader` produces ONE visible green
+  blink:
+      - a very short WHITE "off-pulse" (so back-to-back blinks are visually
+        distinct from one continuous green pulse),
+      - then GREEN for `GREEN_HOLD_SECONDS` seconds,
+      - then back to WHITE.
+* If another new tag arrives while the strip is still green, the current green
+  pulse is cut short and a fresh blink starts. That way, scanning N unique
+  containers in quick succession produces N distinct green blinks — a visual
+  counter for the operator.
+* Every tag line also prints "[LED-RFID] Tags scanned: N" so the running total
+  is visible in the terminal.
 """
 
 import os
@@ -30,15 +39,16 @@ LED_CHANNEL    = 0
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
-WHITE_HEX = "#FFFFFF"        # Idle colour
-GREEN_HEX = "#00FF00"        # New-tag flash colour
+GREEN_HEX = "#00FF00"
+WHITE_HEX = "#FFFFFF"
 OFF_HEX   = "#000000"
 # ────────────────────────────────────────────────────────────
 
-# Per-tag blink burst: how many quick green flashes and how fast.
-BLINK_COUNT       = 4        # number of green flashes per new tag
-BLINK_ON_SECONDS  = 0.08     # green ON duration
-BLINK_OFF_SECONDS = 0.07     # back-to-white duration between flashes
+# How long each green blink lasts after a new tag is detected.
+GREEN_HOLD_SECONDS = 1.0
+# Short white "off-pulse" used to visually separate consecutive green blinks
+# when several tags arrive in quick succession.
+WHITE_FLASH_SECONDS = 0.10
 
 # Pattern that the C reader prints for every NEW unique tag.
 TAG_LINE_RE = re.compile(r"\[RFID\] TAG DETECTED:")
@@ -72,31 +82,59 @@ def main() -> int:
     )
     strip.begin()
 
-    WHITE = hex_to_color(WHITE_HEX)
     GREEN = hex_to_color(GREEN_HEX)
+    WHITE = hex_to_color(WHITE_HEX)
     OFF   = hex_to_color(OFF_HEX)
+
+    # Default idle state: solid WHITE the moment the script starts.
     fill_strip(strip, WHITE)
 
-    stop_event   = threading.Event()
+    # One item is enqueued per new unique tag. The LED worker pops items and
+    # turns them into visible green blinks.
     tag_events: "queue.Queue[float]" = queue.Queue()
+    stop_event = threading.Event()
 
     def led_worker() -> None:
-        # Idle = solid white.
+        """Render the WHITE-idle / GREEN-blink behaviour described in the
+        module docstring."""
+        # Make sure we start from a known white state.
         fill_strip(strip, WHITE)
         while not stop_event.is_set():
+            # Wait for a new-tag event. Short timeout so we can periodically
+            # re-check stop_event.
             try:
                 tag_events.get(timeout=0.1)
             except queue.Empty:
                 continue
 
-            # Fast green blink burst, snapping back to white between flashes.
-            for _ in range(BLINK_COUNT):
-                if stop_event.is_set():
+            # New tag → produce one green blink.
+            # 1. Short white off-pulse so consecutive blinks are visually
+            #    distinct from a single sustained green.
+            fill_strip(strip, WHITE)
+            time.sleep(WHITE_FLASH_SECONDS)
+
+            # 2. GREEN for up to GREEN_HOLD_SECONDS, but cut short and restart
+            #    the blink if another tag arrives in the meantime.
+            fill_strip(strip, GREEN)
+            green_until = time.time() + GREEN_HOLD_SECONDS
+            while not stop_event.is_set():
+                remaining = green_until - time.time()
+                if remaining <= 0:
                     break
-                fill_strip(strip, GREEN)
-                time.sleep(BLINK_ON_SECONDS)
+                try:
+                    tag_events.get(timeout=remaining)
+                except queue.Empty:
+                    break  # full green window elapsed with no new tags
+                # Another tag arrived during the green window → restart blink.
                 fill_strip(strip, WHITE)
-                time.sleep(BLINK_OFF_SECONDS)
+                time.sleep(WHITE_FLASH_SECONDS)
+                fill_strip(strip, GREEN)
+                green_until = time.time() + GREEN_HOLD_SECONDS
+
+            # 3. Back to idle white.
+            fill_strip(strip, WHITE)
+
+        # Shutdown: turn the strip off completely.
         fill_strip(strip, OFF)
 
     led_thread = threading.Thread(target=led_worker, daemon=True)
@@ -139,8 +177,8 @@ def main() -> int:
             sys.stdout.flush()
             if TAG_LINE_RE.search(line):
                 tag_count += 1
-                print(f"[LED-RFID] >>> Total unique tags scanned: {tag_count}",
-                      flush=True)
+                print(f"[LED-RFID] Tags scanned: {tag_count}")
+                sys.stdout.flush()
                 tag_events.put(time.time())
     finally:
         shutdown()
