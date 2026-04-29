@@ -46,7 +46,7 @@ LED_CHANNEL    = 0
 GREEN_PEAK  = 255
 # Brightness of the idle white background, in raw RGB (0..255). Lower than
 # GREEN_PEAK so green visibly stands out against the white.
-WHITE_LEVEL = 60
+WHITE_LEVEL = 10
 # Comet-tail length (LEDs). Longer tail = the green smear behind each wave
 # head reaches further back toward the strip's ends.
 TRAIL_LEN   = 9

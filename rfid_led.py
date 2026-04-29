@@ -28,7 +28,7 @@ import time
 
 from rpi_ws281x import PixelStrip, Color
 
-# ── LED configuration (same as ../leds_on.py) ──────────────
+# ── WS2812 strip configuration (RGB strip on GPIO12 / PWM0) ─
 LED_COUNT      = 19          # Number of LEDs on the strip
 LED_PIN        = 12          # GPIO12 (PWM0)
 LED_FREQ_HZ    = 600000      # WS2812 signal frequency
@@ -36,6 +36,25 @@ LED_DMA        = 10          # DMA channel
 LED_BRIGHTNESS = 225         # 0 (off) to 255 (full brightness)
 LED_INVERT     = False
 LED_CHANNEL    = 0
+# ────────────────────────────────────────────────────────────
+
+# ── Carrier-board white indicator LED (GPIO13) ──────────────
+# A simple, single white LED wired to GPIO13 on the carrier board. Driven
+# with software PWM via `gpiozero.PWMLED`, so it works on any GPIO pin and
+# does NOT conflict with the WS2812 strip on GPIO12.
+#
+# Lifecycle: turns on at WHITE_LED_BRIGHTNESS the moment this script starts,
+# stays on for the entire run, and turns off cleanly on Ctrl+C / shutdown.
+#
+# To change brightness, edit WHITE_LED_BRIGHTNESS below (same 0..255 scale
+# as LED_BRIGHTNESS above). Examples:
+#     WHITE_LED_BRIGHTNESS = 0    → fully off
+#     WHITE_LED_BRIGHTNESS = 64   → quarter brightness
+#     WHITE_LED_BRIGHTNESS = 128  → half brightness
+#     WHITE_LED_BRIGHTNESS = 255  → full brightness
+WHITE_LED_PIN        = 13   # BCM pin number
+WHITE_LED_BRIGHTNESS = 200  # 0 (off) to 255 (full brightness)
+WHITE_LED_PWM_HZ     = 200  # PWM frequency for the white LED, Hz
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
@@ -70,11 +89,51 @@ def fill_strip(strip: PixelStrip, color: int) -> None:
     strip.show()
 
 
+def setup_white_indicator():
+    """Bring up the carrier-board white LED on GPIO13 at WHITE_LED_BRIGHTNESS.
+
+    Returns the gpiozero.PWMLED object on success, or None if anything went
+    wrong (missing library, pin contention, etc.). A failure here is logged
+    but never aborts the RFID feedback — the WS2812 strip is the primary
+    function of this script.
+    """
+    if WHITE_LED_BRIGHTNESS <= 0:
+        print(f"[LED-RFID] White indicator LED disabled (WHITE_LED_BRIGHTNESS=0).")
+        return None
+    try:
+        from gpiozero import PWMLED
+    except Exception as exc:
+        print(f"[LED-RFID] WARNING: gpiozero not available, white LED disabled "
+              f"({exc}). Install with:  sudo apt install -y python3-gpiozero")
+        return None
+    try:
+        led = PWMLED(WHITE_LED_PIN, frequency=WHITE_LED_PWM_HZ)
+        # Clamp to [0.0, 1.0] just in case someone sets WHITE_LED_BRIGHTNESS
+        # outside 0..255.
+        v = WHITE_LED_BRIGHTNESS / 255.0
+        if v < 0.0:
+            v = 0.0
+        elif v > 1.0:
+            v = 1.0
+        led.value = v
+        print(f"[LED-RFID] White indicator LED on GPIO{WHITE_LED_PIN} "
+              f"set to {WHITE_LED_BRIGHTNESS}/255")
+        return led
+    except Exception as exc:
+        print(f"[LED-RFID] WARNING: could not enable white LED on "
+              f"GPIO{WHITE_LED_PIN}: {exc}")
+        return None
+
+
 def main() -> int:
     if not os.path.isfile(RFID_BINARY) or not os.access(RFID_BINARY, os.X_OK):
         print(f"[LED-RFID] ERROR: '{RFID_BINARY}' not found or not executable.")
         print("[LED-RFID] Build it first:  ./compile.sh")
         return 1
+
+    # Carrier-board indicator white LED on GPIO13 — comes on immediately and
+    # stays on for the entire run. None if it failed / is disabled.
+    white_led = setup_white_indicator()
 
     strip = PixelStrip(
         LED_COUNT, LED_PIN, LED_FREQ_HZ,
@@ -165,6 +224,12 @@ def main() -> int:
                 proc.kill()
         led_thread.join(timeout=2)
         fill_strip(strip, OFF)
+        if white_led is not None:
+            try:
+                white_led.value = 0.0
+                white_led.close()
+            except Exception:
+                pass
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)

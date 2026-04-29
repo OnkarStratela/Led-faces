@@ -23,6 +23,9 @@ operator gets a visual count of containers as they're scanned.
 - CAEN R3100C-Lepton3 25 dBm RFID reader on `/dev/ttyACM0` (USB)
 - 2× UHF antennas on `Source_0` and `Source_1`
 - WS2812 LED strip on **GPIO12 (PWM0)**, 19 LEDs (configured in `rfid_led.py`)
+- Single white indicator LED on **GPIO13** (carrier board) — turns on as soon
+  as `rfid_led.py` starts, brightness configurable via `WHITE_LED_BRIGHTNESS`
+  in `rfid_led.py` (0..255 scale, default 200)
 
 ## Build & Run
 
@@ -30,8 +33,9 @@ operator gets a visual count of containers as they're scanned.
 # 1. Make scripts executable (first time only)
 chmod +x compile.sh system.sh
 
-# 2. Make sure the Python LED library is installed on the Pi
+# 2. Make sure the Python LED libraries are installed on the Pi
 sudo pip3 install rpi_ws281x
+sudo apt install -y python3-gpiozero    # for the GPIO13 white indicator LED
 
 # 3. Run everything
 ./system.sh
