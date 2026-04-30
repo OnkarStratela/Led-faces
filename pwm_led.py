@@ -58,8 +58,14 @@ def main() -> int:
         print("\n[pwm-led] Stopping — turning GPIO13 off.")
         sys.stdout.flush()
         try:
+            # Drive the line LOW and hold it; deliberately do NOT call
+            # led.close() here. close() can race the PWM thread and
+            # latch the pin HIGH right as the program exits, which makes
+            # the LED snap to full brightness on shutdown. Holding
+            # value = 0.0 keeps the PWM driver outputting LOW; the OS
+            # cleans up the pin claim when the process exits.
             led.value = 0.0
-            led.close()
+            time.sleep(0.1)
         except Exception:
             pass
 

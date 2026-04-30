@@ -199,8 +199,17 @@ def main() -> int:
         fill_strip(strip, OFF)
         if pwm_led is not None:
             try:
+                # Drive the GPIO13 line steady LOW before exit, then leave
+                # it that way until the process actually terminates. We
+                # deliberately do NOT call pwm_led.close() here: on some
+                # gpiozero / lgpio combinations close() races the PWM
+                # thread and can latch the pin HIGH right as the program
+                # tears down, which makes the LED snap to full brightness
+                # on shutdown (the symptom we are fixing). Holding
+                # value = 0.0 keeps the PWM driver outputting LOW; the OS
+                # cleans up the pin claim when the process exits.
                 pwm_led.value = 0.0
-                pwm_led.close()
+                time.sleep(0.1)
             except Exception:
                 pass
 
