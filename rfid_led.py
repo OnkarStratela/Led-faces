@@ -28,6 +28,11 @@ import time
 
 from rpi_ws281x import PixelStrip, Color
 
+try:
+    from gpiozero import PWMLED  # used for the simple GPIO13 PWM LED
+except Exception:  # pragma: no cover - fall back so RFID flow still runs
+    PWMLED = None  # type: ignore[assignment]
+
 # ── LED configuration (same as ../leds_on.py) ──────────────
 LED_COUNT      = 19          # Number of LEDs on the strip
 LED_PIN        = 12          # GPIO12 (PWM0)
@@ -36,6 +41,12 @@ LED_DMA        = 10          # DMA channel
 LED_BRIGHTNESS = 225         # 0 (off) to 255 (full brightness)
 LED_INVERT     = False
 LED_CHANNEL    = 0
+# ────────────────────────────────────────────────────────────
+
+# ── Simple PWM LED on GPIO13 (independent of the WS2812 strip) ──
+# Held at full brightness for the entire session, off cleanly on exit.
+PWM_LED_PIN        = 13
+PWM_LED_BRIGHTNESS = 1.0  # 0.0 (off) … 1.0 (full)
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
@@ -75,6 +86,27 @@ def main() -> int:
         print(f"[LED-RFID] ERROR: '{RFID_BINARY}' not found or not executable.")
         print("[LED-RFID] Build it first:  ./compile.sh")
         return 1
+
+    # Bring up the simple GPIO13 PWM LED at full brightness immediately, so it
+    # is on the moment system.sh launches this script. Failures here must NOT
+    # affect the RFID / WS2812 flow.
+    pwm_led = None
+    if PWMLED is not None:
+        try:
+            pwm_led = PWMLED(PWM_LED_PIN)
+            pwm_led.value = PWM_LED_BRIGHTNESS
+            print(
+                f"[LED-RFID] GPIO{PWM_LED_PIN} PWM LED ON at "
+                f"{int(PWM_LED_BRIGHTNESS * 100)}% (full brightness)."
+            )
+            sys.stdout.flush()
+        except Exception as exc:
+            print(f"[LED-RFID] WARN: could not init GPIO{PWM_LED_PIN} PWM LED: {exc}")
+            sys.stdout.flush()
+            pwm_led = None
+    else:
+        print("[LED-RFID] WARN: gpiozero not available; skipping GPIO13 PWM LED.")
+        sys.stdout.flush()
 
     strip = PixelStrip(
         LED_COUNT, LED_PIN, LED_FREQ_HZ,
@@ -165,6 +197,12 @@ def main() -> int:
                 proc.kill()
         led_thread.join(timeout=2)
         fill_strip(strip, OFF)
+        if pwm_led is not None:
+            try:
+                pwm_led.value = 0.0
+                pwm_led.close()
+            except Exception:
+                pass
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
