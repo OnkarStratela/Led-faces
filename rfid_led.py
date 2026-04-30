@@ -44,9 +44,9 @@ LED_CHANNEL    = 0
 # ────────────────────────────────────────────────────────────
 
 # ── Simple PWM LED on GPIO13 (independent of the WS2812 strip) ──
-# Held at full brightness for the entire session, off cleanly on exit.
+# Held at PWM_LED_BRIGHTNESS for the entire session, off cleanly on exit.
 PWM_LED_PIN        = 13
-PWM_LED_BRIGHTNESS = 1.0  # 0.0 (off) … 1.0 (full)
+PWM_LED_BRIGHTNESS = 0.5  # 0.0 (off) … 1.0 (full)
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
@@ -97,7 +97,7 @@ def main() -> int:
             pwm_led.value = PWM_LED_BRIGHTNESS
             print(
                 f"[LED-RFID] GPIO{PWM_LED_PIN} PWM LED ON at "
-                f"{int(PWM_LED_BRIGHTNESS * 100)}% (full brightness)."
+                f"{int(PWM_LED_BRIGHTNESS * 100)}% duty."
             )
             sys.stdout.flush()
         except Exception as exc:

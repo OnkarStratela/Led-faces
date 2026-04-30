@@ -36,7 +36,7 @@ import time
 from gpiozero import PWMLED
 
 PWM_PIN = 13     # GPIO13 (PWM1)
-BRIGHTNESS = 1.0 # 0.0 (off) to 1.0 (full brightness)
+BRIGHTNESS = 0.5 # 0.0 (off) to 1.0 (full brightness)
 
 
 def main() -> int:
@@ -44,8 +44,8 @@ def main() -> int:
     led.value = BRIGHTNESS
 
     print(
-        f"[pwm-led] GPIO{PWM_PIN} ON at {int(BRIGHTNESS * 100)}% duty "
-        f"(full brightness). Ctrl+C to stop."
+        f"[pwm-led] GPIO{PWM_PIN} ON at {int(BRIGHTNESS * 100)}% duty. "
+        f"Ctrl+C to stop."
     )
     sys.stdout.flush()
 
