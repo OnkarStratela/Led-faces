@@ -17,6 +17,7 @@ Behaviour
   is visible in the terminal.
 """
 
+import atexit
 import os
 import queue
 import re
@@ -68,6 +69,37 @@ SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 RFID_BINARY = os.path.join(SCRIPT_DIR, "rfid_reader")
 
 
+def _force_gpio_low(pin: int) -> None:
+    """Force `pin` to OUTPUT driving LOW at the SoC pin-mux register level.
+
+    Last-resort cleanup for the GPIO13 PWM LED. When gpiozero / lgpio
+    releases the GPIO chardev claim on shutdown, on Pi OS Bookworm the
+    SoC pin-mux register is sometimes left configured as OUTPUT-HIGH
+    (or floats and is pulled HIGH by the LED circuit) — which makes the
+    LED snap to maximum brightness as the program exits.
+
+    `pinctrl` (preinstalled on Pi OS Bookworm; `raspi-gpio` on older
+    releases) writes the SoC pin-mux register directly. That state
+    persists after our Python process exits, so the LED stays off until
+    a reboot or another GPIO library reclaims the pin.
+    """
+    for cmd in (
+        ["pinctrl", "set", str(pin), "op", "dl"],
+        ["raspi-gpio", "set", str(pin), "op", "dl"],
+    ):
+        try:
+            subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+            )
+            return
+        except Exception:
+            continue
+
+
 def hex_to_color(hex_code: str) -> int:
     r = int(hex_code[1:3], 16)
     g = int(hex_code[3:5], 16)
@@ -90,6 +122,12 @@ def main() -> int:
     # Bring up the simple GPIO13 PWM LED at full brightness immediately, so it
     # is on the moment system.sh launches this script. Failures here must NOT
     # affect the RFID / WS2812 flow.
+    #
+    # Register the SoC-level pin-LOW fallback BEFORE creating PWMLED so that
+    # in atexit's LIFO order our handler runs AFTER gpiozero's own cleanup.
+    # That way, even on a crash / unexpected exit, the LED ends up off.
+    atexit.register(_force_gpio_low, PWM_LED_PIN)
+
     pwm_led = None
     if PWMLED is not None:
         try:
@@ -198,20 +236,23 @@ def main() -> int:
         led_thread.join(timeout=2)
         fill_strip(strip, OFF)
         if pwm_led is not None:
+            # Step 1: tell gpiozero to drive the line LOW (PWM duty 0%).
             try:
-                # Drive the GPIO13 line steady LOW before exit, then leave
-                # it that way until the process actually terminates. We
-                # deliberately do NOT call pwm_led.close() here: on some
-                # gpiozero / lgpio combinations close() races the PWM
-                # thread and can latch the pin HIGH right as the program
-                # tears down, which makes the LED snap to full brightness
-                # on shutdown (the symptom we are fixing). Holding
-                # value = 0.0 keeps the PWM driver outputting LOW; the OS
-                # cleans up the pin claim when the process exits.
                 pwm_led.value = 0.0
-                time.sleep(0.1)
+                time.sleep(0.05)
             except Exception:
                 pass
+            # Step 2: release the gpiozero / lgpio chardev claim so the
+            # SoC-level pin-mux write below isn't fighting an active claim.
+            try:
+                pwm_led.close()
+            except Exception:
+                pass
+        # Step 3: hardware-level final LOW. This writes the SoC pin-mux
+        # register directly and persists after our process exits, even
+        # if a later atexit handler (e.g. gpiozero's) would have left
+        # the pin floating / latched HIGH.
+        _force_gpio_low(PWM_LED_PIN)
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
