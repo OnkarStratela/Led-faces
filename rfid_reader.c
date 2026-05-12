@@ -23,6 +23,11 @@
 #define POWER_MW      316
 #define SCAN_MS       25
 
+/* After at least one tag is remembered: if no tags are seen in-field for this
+ * many seconds, show a countdown then clear dedupe memory so EPCs can repeat. */
+#define IDLE_BEFORE_RESET_SEC 10
+#define RESET_COUNTDOWN_SEC   30
+
 volatile int running = 0;
 
 static void printHex(uint8_t* vect, uint16_t length, char* result) {
@@ -85,9 +90,12 @@ int main(void) {
 
     char seen_tags[MAX_TAGS][2 * MAX_ID_LENGTH + 1];
     int  tag_count = 0;
+    time_t last_tags_in_field = 0;
 
     running = 1;
     while (running) {
+        bool tags_present_this_cycle = false;
+
         for (int a = 0; a < ANTENNA_COUNT && running; a++) {
             CAENRFIDTagList *tags = NULL, *aux;
             uint16_t numTags = 0;
@@ -96,6 +104,7 @@ int main(void) {
                                        NULL, 0, 0, &tags, &numTags);
 
             if (ec == CAENRFID_StatusOK && numTags > 0) {
+                tags_present_this_cycle = true;
                 aux = tags;
                 while (aux != NULL) {
                     char epcStr[2 * MAX_ID_LENGTH + 1];
@@ -130,6 +139,27 @@ int main(void) {
                     CAENRFIDTagList *next = aux->Next;
                     free(aux);
                     aux = next;
+                }
+            }
+        }
+
+        if (tags_present_this_cycle) {
+            last_tags_in_field = time(NULL);
+        }
+
+        if (tag_count > 0 && last_tags_in_field != 0 && running) {
+            time_t now = time(NULL);
+            if (difftime(now, last_tags_in_field) >= (double)IDLE_BEFORE_RESET_SEC) {
+                for (int sec = RESET_COUNTDOWN_SEC; sec > 0 && running; sec--) {
+                    printf("\r[RFID] Clearing tag memory in %2d s... ", sec);
+                    fflush(stdout);
+                    sleep(1);
+                }
+                if (running) {
+                    printf("\n[RFID] Tag memory cleared.\n");
+                    fflush(stdout);
+                    tag_count = 0;
+                    last_tags_in_field = 0;
                 }
             }
         }
