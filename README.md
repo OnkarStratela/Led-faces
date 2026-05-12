@@ -10,7 +10,7 @@ operator gets a visual count of containers as they're scanned.
 
 | File | Purpose |
 |------|---------|
-| `rfid_reader.c`     | C program that talks to the CAEN reader, performs continuous inventory on both antennas, dedupes via a `seen_tags[]` table, and prints each unique tag with timestamp + RSSI. |
+| `rfid_reader.c`     | C program that talks to the CAEN reader, performs continuous inventory on both antennas, dedupes via a `seen_tags[]` table, and prints each unique tag with timestamp and which antenna (`Source_0` / `Source_1`) reported it. |
 | `compile.sh`        | Builds `rfid_reader` from `rfid_reader.c` + the `SRC/` CAEN light library. |
 | `rfid_led.py`       | Python bridge: launches the `rfid_reader` binary, parses its stdout, holds the WS2812 strip white while idle, and blinks it green for 1 s on every new unique tag. |
 | `system.sh`         | One-shot runner: checks the `SRC/` library, compiles, and launches `rfid_led.py` (with `sudo` so the LED PWM/DMA can be accessed). |
@@ -46,7 +46,7 @@ sudo pip3 install rpi_ws281x
 ## What you'll see
 
 ```
-[RFID] TAG DETECTED: E20000172211010418905449 (RSSI: -512 dBm) [Source_0] [2026-04-29 14:32:45]
+[RFID] TAG DETECTED: E20000172211010418905449 [Source_0] [2026-04-29 14:32:45]
 [LED-RFID] Tags scanned: 1
 ```
 
@@ -70,8 +70,8 @@ it to disconnect cleanly, then turns the LEDs off (`#000000`).
 - Green blink length: change `GREEN_HOLD_SECONDS` in `rfid_led.py`.
 - Gap between back-to-back blinks: change `WHITE_FLASH_SECONDS` in
   `rfid_led.py`.
-- RFID power and RSSI threshold: edit `power` and `RSSI_THRESHOLD` in
-  `rfid_reader.c`, then re-run `./compile.sh` (or just `./system.sh`).
+- RFID output power: edit `POWER_MW` in `rfid_reader.c`, then re-run
+  `./compile.sh` (or just `./system.sh`).
 
 ## Troubleshooting
 
@@ -80,6 +80,6 @@ it to disconnect cleanly, then turns the LEDs off (`#000000`).
   then log out / log in.
 - **`mmap() failed` from rpi_ws281x** — you must run as root (`sudo`),
   which `system.sh` already handles.
-- **Reader connects but no tags appear** — bring a tag closer; the default
-  `RSSI_THRESHOLD` in `rfid_reader.c` is tuned for ~10 cm. Lower (more
-  negative) the threshold to extend range.
+- **Reader connects but no tags appear** — bring a tag closer, confirm both
+  antennas are connected, or increase `POWER_MW` in `rfid_reader.c` (within
+  hardware limits), then recompile.
