@@ -1,5 +1,6 @@
-// Simple single-antenna RFID reader.
-// Continuously scans on Source_0, prints every NEW unique EPC in green.
+// Simple dual-antenna RFID reader (Source_0 + Source_1).
+// Continuously scans both antennas; prints every NEW unique EPC in green
+// with the antenna that reported it.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,9 +19,9 @@
 #define GREEN "\033[0;32m"
 #define RESET "\033[0m"
 
-#define ANTENNA   "Source_0"
-#define POWER_MW  100
-#define SCAN_MS   25
+#define ANTENNA_COUNT 2
+#define POWER_MW      100
+#define SCAN_MS       25
 
 volatile int running = 0;
 
@@ -75,57 +76,61 @@ int main(void) {
         printf("[RFID] Reader: %s, Serial: %s\n", model, serial);
     }
 
+    const char *sources[ANTENNA_COUNT] = {"Source_0", "Source_1"};
+
     CAENRFID_SetPower(&reader, POWER_MW);
     printf("[RFID] Power set to %d mW\n", POWER_MW);
-    printf("[RFID] Active antenna: %s\n", ANTENNA);
-    printf("[RFID] Scanning every %d ms — press Ctrl+C to stop\n\n", SCAN_MS);
+    printf("[RFID] Scanning on %s and %s every %d ms — press Ctrl+C to stop\n\n",
+           sources[0], sources[1], SCAN_MS);
 
     char seen_tags[MAX_TAGS][2 * MAX_ID_LENGTH + 1];
     int  tag_count = 0;
 
     running = 1;
     while (running) {
-        CAENRFIDTagList *tags = NULL, *aux;
-        uint16_t numTags = 0;
+        for (int a = 0; a < ANTENNA_COUNT && running; a++) {
+            CAENRFIDTagList *tags = NULL, *aux;
+            uint16_t numTags = 0;
 
-        ec = CAENRFID_InventoryTag(&reader, ANTENNA, 0, 0, 0,
-                                   NULL, 0, 0, &tags, &numTags);
+            ec = CAENRFID_InventoryTag(&reader, (char *)sources[a], 0, 0, 0,
+                                       NULL, 0, 0, &tags, &numTags);
 
-        if (ec == CAENRFID_StatusOK && numTags > 0) {
-            aux = tags;
-            while (aux != NULL) {
-                char epcStr[2 * MAX_ID_LENGTH + 1];
-                printHex(aux->Tag.ID, aux->Tag.Length, epcStr);
+            if (ec == CAENRFID_StatusOK && numTags > 0) {
+                aux = tags;
+                while (aux != NULL) {
+                    char epcStr[2 * MAX_ID_LENGTH + 1];
+                    printHex(aux->Tag.ID, aux->Tag.Length, epcStr);
 
-                bool is_new = true;
-                for (int i = 0; i < tag_count; i++) {
-                    if (strcmp(seen_tags[i], epcStr) == 0) {
-                        is_new = false;
-                        break;
+                    bool is_new = true;
+                    for (int i = 0; i < tag_count; i++) {
+                        if (strcmp(seen_tags[i], epcStr) == 0) {
+                            is_new = false;
+                            break;
+                        }
                     }
-                }
 
-                if (is_new) {
-                    time_t rawtime;
-                    struct tm *timeinfo;
-                    char time_buffer[80];
-                    time(&rawtime);
-                    timeinfo = localtime(&rawtime);
-                    strftime(time_buffer, sizeof(time_buffer),
-                             "%Y-%m-%d %H:%M:%S", timeinfo);
+                    if (is_new) {
+                        time_t rawtime;
+                        struct tm *timeinfo;
+                        char time_buffer[80];
+                        time(&rawtime);
+                        timeinfo = localtime(&rawtime);
+                        strftime(time_buffer, sizeof(time_buffer),
+                                 "%Y-%m-%d %H:%M:%S", timeinfo);
 
-                    printf("%s[RFID] TAG DETECTED: %s%s [%s]\n",
-                           GREEN, epcStr, RESET, time_buffer);
-                    fflush(stdout);
+                        printf("%s[RFID] TAG DETECTED: %s%s [%s] [%s]\n",
+                               GREEN, epcStr, RESET, sources[a], time_buffer);
+                        fflush(stdout);
 
-                    if (tag_count < MAX_TAGS) {
-                        strcpy(seen_tags[tag_count++], epcStr);
+                        if (tag_count < MAX_TAGS) {
+                            strcpy(seen_tags[tag_count++], epcStr);
+                        }
                     }
-                }
 
-                CAENRFIDTagList *next = aux->Next;
-                free(aux);
-                aux = next;
+                    CAENRFIDTagList *next = aux->Next;
+                    free(aux);
+                    aux = next;
+                }
             }
         }
 
