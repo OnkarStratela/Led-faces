@@ -20,7 +20,7 @@
 #define RESET "\033[0m"
 
 #define ANTENNA_COUNT 2
-#define POWER_MW      100
+#define POWER_MW      316
 #define SCAN_MS       25
 
 volatile int running = 0;
