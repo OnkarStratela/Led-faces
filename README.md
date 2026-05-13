@@ -10,7 +10,7 @@ operator gets a visual count of containers as they're scanned.
 
 | File | Purpose |
 |------|---------|
-| `rfid_reader.c`     | C program that talks to the CAEN reader, performs continuous inventory on both antennas, dedupes via a `seen_tags[]` table, and prints each unique tag with timestamp and which antenna (`Source_0` / `Source_1`) reported it. |
+| `rfid_reader.c`     | C program that talks to the CAEN reader, performs continuous inventory on both antennas, dedupes via a `seen_tags[]` table until **no tag reads occur for 15 s**, then clears that list so the same EPCs can be reported again; prints each new detection with timestamp and antenna (`Source_0` / `Source_1`). |
 | `compile.sh`        | Builds `rfid_reader` from `rfid_reader.c` + the `SRC/` CAEN light library. |
 | `rfid_led.py`       | Python bridge: launches the `rfid_reader` binary, parses its stdout, holds the WS2812 strip white while idle, and blinks it green for 1 s on every new unique tag. |
 | `system.sh`         | One-shot runner: checks the `SRC/` library, compiles, and launches `rfid_led.py` (with `sudo` so the LED PWM/DMA can be accessed). |
@@ -72,6 +72,10 @@ it to disconnect cleanly, then turns the LEDs off (`#000000`).
   `rfid_led.py`.
 - RFID output power: edit `POWER_MW` in `rfid_reader.c`, then re-run
   `./compile.sh` (or just `./system.sh`).
+- Time between full **two-antenna** poll rounds: edit `SCAN_MS` (milliseconds)
+  in `rfid_reader.c`, then recompile.
+- How long with **no tag reads** before dedupe clears so repeats count again:
+  edit `IDLE_RESET_SEC` in `rfid_reader.c`, then recompile.
 
 ## Troubleshooting
 
