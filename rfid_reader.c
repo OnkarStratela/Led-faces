@@ -20,13 +20,9 @@
 #define RESET "\033[0m"
 
 #define ANTENNA_COUNT 2
-#define POWER_MW      316
-#define SCAN_MS       25
-
-/* After at least one tag is remembered: if no tags are seen in-field for this
- * many seconds, show a countdown then clear dedupe memory so EPCs can repeat. */
-#define IDLE_BEFORE_RESET_SEC 10
-#define RESET_COUNTDOWN_SEC   30
+#define POWER_MW       316
+#define SCAN_MS        10
+#define IDLE_RESET_SEC 15
 
 volatile int running = 0;
 
@@ -90,11 +86,11 @@ int main(void) {
 
     char seen_tags[MAX_TAGS][2 * MAX_ID_LENGTH + 1];
     int  tag_count = 0;
-    time_t last_tags_in_field = 0;
+    time_t last_any_tag_seen = 0;
 
     running = 1;
     while (running) {
-        bool tags_present_this_cycle = false;
+        bool saw_any_tag = false;
 
         for (int a = 0; a < ANTENNA_COUNT && running; a++) {
             CAENRFIDTagList *tags = NULL, *aux;
@@ -104,7 +100,7 @@ int main(void) {
                                        NULL, 0, 0, &tags, &numTags);
 
             if (ec == CAENRFID_StatusOK && numTags > 0) {
-                tags_present_this_cycle = true;
+                saw_any_tag = true;
                 aux = tags;
                 while (aux != NULL) {
                     char epcStr[2 * MAX_ID_LENGTH + 1];
@@ -143,25 +139,13 @@ int main(void) {
             }
         }
 
-        if (tags_present_this_cycle) {
-            last_tags_in_field = time(NULL);
-        }
-
-        if (tag_count > 0 && last_tags_in_field != 0 && running) {
-            time_t now = time(NULL);
-            if (difftime(now, last_tags_in_field) >= (double)IDLE_BEFORE_RESET_SEC) {
-                for (int sec = RESET_COUNTDOWN_SEC; sec > 0 && running; sec--) {
-                    printf("\r[RFID] Clearing tag memory in %2d s... ", sec);
-                    fflush(stdout);
-                    sleep(1);
-                }
-                if (running) {
-                    printf("\n[RFID] Tag memory cleared.\n");
-                    fflush(stdout);
-                    tag_count = 0;
-                    last_tags_in_field = 0;
-                }
-            }
+        time_t now = time(NULL);
+        if (saw_any_tag) {
+            last_any_tag_seen = now;
+        } else if (last_any_tag_seen != 0 &&
+                   (now - last_any_tag_seen) >= IDLE_RESET_SEC) {
+            tag_count = 0;
+            last_any_tag_seen = 0;
         }
 
         usleep(SCAN_MS * 1000);
