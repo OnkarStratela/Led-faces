@@ -22,7 +22,6 @@
 #define ANTENNA_COUNT 2
 #define POWER_MW       316
 #define SCAN_MS        10
-#define IDLE_RESET_SEC 15
 
 volatile int running = 0;
 
@@ -86,12 +85,9 @@ int main(void) {
 
     char seen_tags[MAX_TAGS][2 * MAX_ID_LENGTH + 1];
     int  tag_count = 0;
-    time_t last_any_tag_seen = 0;
 
     running = 1;
     while (running) {
-        bool saw_any_tag = false;
-
         for (int a = 0; a < ANTENNA_COUNT && running; a++) {
             CAENRFIDTagList *tags = NULL, *aux;
             uint16_t numTags = 0;
@@ -100,7 +96,6 @@ int main(void) {
                                        NULL, 0, 0, &tags, &numTags);
 
             if (ec == CAENRFID_StatusOK && numTags > 0) {
-                saw_any_tag = true;
                 aux = tags;
                 while (aux != NULL) {
                     char epcStr[2 * MAX_ID_LENGTH + 1];
@@ -137,15 +132,6 @@ int main(void) {
                     aux = next;
                 }
             }
-        }
-
-        time_t now = time(NULL);
-        if (saw_any_tag) {
-            last_any_tag_seen = now;
-        } else if (last_any_tag_seen != 0 &&
-                   (now - last_any_tag_seen) >= IDLE_RESET_SEC) {
-            tag_count = 0;
-            last_any_tag_seen = 0;
         }
 
         usleep(SCAN_MS * 1000);
