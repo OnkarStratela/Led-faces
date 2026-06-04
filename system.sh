@@ -85,7 +85,7 @@ if [ $? -eq 0 ]; then
     echo "  4) red wave on white        (red wave slides to the middle over WHITE background)"
     echo "  5) signature glide          (premium eased white light gliding on matte black)"
     echo "  6) signature glide + bloom  (same glide; scan = green bloom expanding from center)"
-    echo "  7) converge                 (twin white comets flash red as they meet; scan = green burst)"
+    echo "  7) converge                 (twin white comets meet in the middle; scan = green burst)"
     echo ""
     read -p "Enter choice [1/2/3/4/5/6/7]: " LED_CHOICE
 
