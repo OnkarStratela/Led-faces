@@ -6,10 +6,11 @@ Rationale
 ---------
 The bin is matte black, so the IDLE background is left OFF. Two crisp
 full-white comets launch from the two ENDS of the strip and glide INWARD with
-eased acceleration, each trailing a soft cool-white tail. As they reach the
-CENTRE they collide in a brief luminous bloom, then sweep back out — a
-continuous, breathing convergence. The energy pulling toward the centre reads
-as "deposit here" and looks like a designed product light against black.
+eased acceleration, each trailing a soft cool-white tail. The instant they
+TOUCH in the CENTRE the contact point flashes RED, then they bounce back out
+and fade to white again — a continuous, breathing convergence. The energy
+pulling toward the centre reads as "deposit here" and looks like a designed
+product light against black.
 
 The scan acknowledgment is a matching green version: both comets snap to green
 and SLAM to the centre into a full-green burst that holds, then dissolves back
@@ -25,7 +26,8 @@ Two hard constraints are respected:
 Behaviour
 ---------
 * Idle (no tags being scanned): two cool-white comets converge to the centre
-  and sweep back out over an OFF strip, looping forever.
+  (flashing RED at the moment they touch) and sweep back out over an OFF strip,
+  looping forever.
 * Every NEW unique tag reported by `rfid_reader` produces ONE green burst:
   green comets slam to the centre, a full-green flash holds, then dissolves.
 * If another new tag arrives during a burst, it is cut short and a fresh one
@@ -172,32 +174,51 @@ def _render_twin_comets(
 ) -> None:
     """Render two comets (at `left_pos`/`right_pos`) plus a centre meet-glow.
 
-    `meet_glow` (0..1) adds brightness at the centre as the comets converge.
-    `green` selects the colour: pure green when True, cool white otherwise.
+    `meet_glow` (0..1) is how strongly the comets are meeting at the centre.
+    `green` selects the comet colour: pure green when True, cool white when
+    False. In the cool-white idle mode the meeting point flashes RED as the
+    comets touch (the green burst keeps its meeting green).
     """
     center = (n - 1) / 2.0
     for i in range(n):
         dl = i - left_pos
         dr = i - right_pos
-        intensity = max(
+        comet = max(
             math.exp(-(dl * dl) / two_sigma_sq),
             math.exp(-(dr * dr) / two_sigma_sq),
         )
+
+        if green:
+            intensity = comet
+            if meet_glow > 0.0:
+                dc = i - center
+                intensity = max(
+                    intensity,
+                    meet_glow * math.exp(-(dc * dc) / two_sigma_sq),
+                )
+            if intensity < CONVERGE_MIN_INTENSITY:
+                strip.setPixelColor(i, 0)
+                continue
+            strip.setPixelColor(i, Color(0, int(round(255 * intensity)), 0))
+            continue
+
+        # Cool-white comets with a RED flash where they touch in the centre.
+        red = 0.0
         if meet_glow > 0.0:
             dc = i - center
-            intensity = max(
-                intensity,
-                meet_glow * math.exp(-(dc * dc) / two_sigma_sq),
-            )
-        if intensity < CONVERGE_MIN_INTENSITY:
+            red = meet_glow * math.exp(-(dc * dc) / two_sigma_sq)
+        if comet < CONVERGE_MIN_INTENSITY and red < CONVERGE_MIN_INTENSITY:
             strip.setPixelColor(i, 0)
             continue
-        if green:
-            strip.setPixelColor(i, Color(0, int(round(255 * intensity)), 0))
-        else:
-            r = int(round(255 * intensity))
-            b = int(round(255 * (intensity ** CONVERGE_COOL_EXPONENT)))
-            strip.setPixelColor(i, Color(r, r, b))
+        # White base from the comets; the red overlay boosts red and suppresses
+        # green/blue, so the contact point reads as pure red, easing back to
+        # white as the comets separate.
+        white_r = 255 * comet
+        white_b = 255 * (comet ** CONVERGE_COOL_EXPONENT)
+        r = max(white_r, 255 * red)
+        g = white_r * (1.0 - red)
+        b = white_b * (1.0 - red)
+        strip.setPixelColor(i, Color(int(round(r)), int(round(g)), int(round(b))))
 
 
 def idle_converge_until_tag(
@@ -234,8 +255,9 @@ def idle_converge_until_tag(
         p = 0.5 - 0.5 * math.cos(2.0 * math.pi * t / CONVERGE_PERIOD_SECONDS)
         left_pos = p * center
         right_pos = (n - 1) - p * center
-        # Centre glow grows as the comets close the final stretch (p → 1).
-        meet_glow = CONVERGE_MEET_GLOW * _ease((p - 0.7) / 0.3)
+        # Red contact flash: only as the comets actually touch (p → 1), so it
+        # snaps red on contact and fades to white as they bounce apart.
+        meet_glow = CONVERGE_MEET_GLOW * _ease((p - 0.82) / 0.18)
 
         _render_twin_comets(
             strip, n, left_pos, right_pos, two_sigma_sq, meet_glow, green=False
