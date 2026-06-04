@@ -76,15 +76,33 @@ echo -e "${YELLOW}Compiling RFID reader...${NC}"
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}Compilation successful!${NC}"
     echo ""
-    echo -e "${GREEN}Starting RFID reader with LED feedback...${NC}"
+
+    # Let the operator pick which LED behaviour to run.
+    echo -e "${YELLOW}Select LED mode:${NC}"
+    echo "  1) rfid_led.py            (white snaps back after green)"
+    echo "  2) white light pointing center (white slides from edges to the middle after green)"
+    echo ""
+    read -p "Enter choice [1/2]: " LED_CHOICE
+
+    case "$LED_CHOICE" in
+        2)
+            LED_SCRIPT="rfid_led_center.py"
+            ;;
+        *)
+            LED_SCRIPT="rfid_led.py"
+            ;;
+    esac
+
+    echo ""
+    echo -e "${GREEN}Starting RFID reader with LED feedback (${LED_SCRIPT})...${NC}"
     echo -e "${YELLOW}(LEDs will turn GREEN whenever a new unique tag is scanned)${NC}"
     echo ""
 
     # The rpi_ws281x library needs root for PWM/DMA access on the Pi.
     if [ "$EUID" -ne 0 ]; then
-        sudo python3 rfid_led.py
+        sudo python3 "$LED_SCRIPT"
     else
-        python3 rfid_led.py
+        python3 "$LED_SCRIPT"
     fi
 else
     echo -e "${RED}Compilation failed. Please check error messages.${NC}"
