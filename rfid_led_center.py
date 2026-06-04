@@ -69,7 +69,7 @@ GREEN_HOLD_SECONDS = 1.0
 # when several tags arrive in quick succession.
 WHITE_FLASH_SECONDS = 0.10
 # Delay between each step of the edge-to-centre white slide animation.
-SLIDE_STEP_SECONDS = 0.04
+SLIDE_STEP_SECONDS = 0.12
 # Brief pause holding the completed sweep before the slide restarts.
 SLIDE_HOLD_SECONDS = 0.20
 
