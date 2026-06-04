@@ -1,19 +1,21 @@
 """Bridge between the CAEN RFID reader (rfid_reader.c) and the WS2812 LED strip.
 
-Same functionality as rfid_led.py, with ONE visual difference: when the WHITE
-light comes back after a GREEN blink, instead of snapping on instantly it
-SLIDES in from both outer edges of the strip toward the middle (the two white
-fronts advance inward until they meet in the centre).
+Same functionality as rfid_led.py, with ONE visual difference: the IDLE state
+is not solid white. Instead the strip is OFF and a WHITE "slide-to-centre"
+animation runs constantly — two white fronts grow inward from both outer edges
+until they meet in the middle, then the cycle repeats. The GREEN tag-blink is
+unchanged.
 
 Behaviour
 ---------
-* Idle (no tags being scanned): the strip is solid WHITE.
+* Idle (no tags being scanned): the strip is OFF and white continuously slides
+  in from both edges toward the middle, looping forever.
 * Every NEW unique tag reported by `rfid_reader` produces ONE visible green
   blink:
       - a very short WHITE "off-pulse" (so back-to-back blinks are visually
         distinct from one continuous green pulse),
       - then GREEN for `GREEN_HOLD_SECONDS` seconds,
-      - then WHITE slides back in from the edges to the middle.
+      - then back to the constant white slide-to-centre idle animation.
 * If another new tag arrives while the strip is still green, the current green
   pulse is cut short and a fresh blink starts. That way, scanning N unique
   containers in quick succession produces N distinct green blinks — a visual
@@ -68,6 +70,8 @@ GREEN_HOLD_SECONDS = 1.0
 WHITE_FLASH_SECONDS = 0.10
 # Delay between each step of the edge-to-centre white slide animation.
 SLIDE_STEP_SECONDS = 0.04
+# Brief pause holding the completed sweep before the slide restarts.
+SLIDE_HOLD_SECONDS = 0.20
 
 # Pattern that the C reader prints for every NEW unique tag.
 TAG_LINE_RE = re.compile(r"\[RFID\] TAG DETECTED:")
@@ -120,37 +124,62 @@ def fill_strip(strip: PixelStrip, color: int) -> None:
     strip.show()
 
 
-def slide_white_to_center(
+def idle_slide_until_tag(
     strip: PixelStrip,
     white: int,
-    base: int,
+    off: int,
     stop_event: "threading.Event",
-) -> None:
-    """Animate WHITE sliding in from both outer edges toward the middle.
+    tag_events: "queue.Queue[float]",
+) -> bool:
+    """Run the constant edge-to-centre white slide over an OFF strip.
 
-    Every pixel starts at `base`; white pixels then grow inward from the two
-    edges, one step at a time, until the two fronts meet in the centre and the
-    whole strip is WHITE.
+    Each sweep starts from a fully OFF strip and grows two WHITE fronts inward
+    from the outer edges until they meet in the middle; then the sweep repeats,
+    so the animation runs continuously. Between every frame we poll for a new
+    tag event.
+
+    Returns True if a new-tag event arrived (it has been consumed from the
+    queue, so the caller should render a green blink). Returns False if
+    `stop_event` was set instead.
     """
     n = strip.numPixels()
-    for i in range(n):
-        strip.setPixelColor(i, base)
-    strip.show()
-
-    left = 0
-    right = n - 1
-    while left <= right and not stop_event.is_set():
-        strip.setPixelColor(left, white)
-        strip.setPixelColor(right, white)
+    while not stop_event.is_set():
+        # Begin each sweep from a fully OFF strip.
+        for i in range(n):
+            strip.setPixelColor(i, off)
         strip.show()
-        time.sleep(SLIDE_STEP_SECONDS)
-        left += 1
-        right -= 1
 
-    # Guarantee a fully-white final state (also covers an early stop).
-    for i in range(n):
-        strip.setPixelColor(i, white)
-    strip.show()
+        left = 0
+        right = n - 1
+        while left <= right:
+            if stop_event.is_set():
+                return False
+            try:
+                tag_events.get_nowait()
+                return True
+            except queue.Empty:
+                pass
+            strip.setPixelColor(left, white)
+            strip.setPixelColor(right, white)
+            strip.show()
+            time.sleep(SLIDE_STEP_SECONDS)
+            left += 1
+            right -= 1
+
+        # Brief hold on the completed sweep before the next one restarts,
+        # while still staying responsive to new tags / shutdown.
+        hold_until = time.time() + SLIDE_HOLD_SECONDS
+        while time.time() < hold_until:
+            if stop_event.is_set():
+                return False
+            try:
+                tag_events.get_nowait()
+                return True
+            except queue.Empty:
+                pass
+            time.sleep(SLIDE_STEP_SECONDS)
+
+    return False
 
 
 def main() -> int:
@@ -196,8 +225,9 @@ def main() -> int:
     WHITE = hex_to_color(WHITE_HEX)
     OFF   = hex_to_color(OFF_HEX)
 
-    # Default idle state: solid WHITE the moment the script starts.
-    fill_strip(strip, WHITE)
+    # Default idle state: strip OFF (the looping white slide takes over once
+    # the LED worker thread starts).
+    fill_strip(strip, OFF)
 
     # One item is enqueued per new unique tag. The LED worker pops items and
     # turns them into visible green blinks.
@@ -205,19 +235,18 @@ def main() -> int:
     stop_event = threading.Event()
 
     def led_worker() -> None:
-        """Render the WHITE-idle / GREEN-blink behaviour described in the
-        module docstring."""
-        # Make sure we start from a known white state.
-        fill_strip(strip, WHITE)
+        """Render the constant white slide-to-centre idle / GREEN-blink
+        behaviour described in the module docstring."""
         while not stop_event.is_set():
-            # Wait for a new-tag event. Short timeout so we can periodically
-            # re-check stop_event.
-            try:
-                tag_events.get(timeout=0.1)
-            except queue.Empty:
-                continue
+            # Idle: run the constant edge-to-centre white slide over an OFF
+            # strip until a new tag arrives (or we are told to stop).
+            got_tag = idle_slide_until_tag(
+                strip, WHITE, OFF, stop_event, tag_events
+            )
+            if not got_tag:
+                break  # stop_event was set
 
-            # New tag → produce one green blink.
+            # New tag → produce one green blink (unchanged behaviour).
             # 1. Short white off-pulse so consecutive blinks are visually
             #    distinct from a single sustained green.
             fill_strip(strip, WHITE)
@@ -241,8 +270,8 @@ def main() -> int:
                 fill_strip(strip, GREEN)
                 green_until = time.time() + GREEN_HOLD_SECONDS
 
-            # 3. Back to idle white — slide it in from the edges to the middle.
-            slide_white_to_center(strip, WHITE, GREEN, stop_event)
+            # 3. Back to the constant white slide-to-centre idle animation
+            #    (next loop iteration).
 
         # Shutdown: turn the strip off completely.
         fill_strip(strip, OFF)
