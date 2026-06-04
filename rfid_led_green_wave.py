@@ -74,7 +74,7 @@ SLIDE_STEP_SECONDS = 0.12
 SLIDE_HOLD_SECONDS = 0.20
 # How many pixels stay coloured behind each moving front (length of the
 # "tail"). Smaller = shorter tail.
-SLIDE_TAIL_PIXELS = 3
+SLIDE_TAIL_PIXELS = 6
 
 # Pattern that the C reader prints for every NEW unique tag.
 TAG_LINE_RE = re.compile(r"\[RFID\] TAG DETECTED:")
