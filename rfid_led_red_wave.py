@@ -54,7 +54,7 @@ LED_CHANNEL    = 0
 # ── Simple PWM LED on GPIO13 (independent of the WS2812 strip) ──
 # Held at PWM_LED_BRIGHTNESS for the entire session, off cleanly on exit.
 PWM_LED_PIN        = 13
-PWM_LED_BRIGHTNESS = 0.5  # 0.0 (off) … 1.0 (full)
+PWM_LED_BRIGHTNESS = 1.0  # 0.0 (off) … 1.0 (full)
 # ────────────────────────────────────────────────────────────
 
 # ── Colours (HEX) ──────────────────────────────────────────
