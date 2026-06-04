@@ -86,8 +86,9 @@ if [ $? -eq 0 ]; then
     echo "  5) signature glide          (premium eased white light gliding on matte black)"
     echo "  6) signature glide + bloom  (same glide; scan = green bloom expanding from center)"
     echo "  7) converge                 (twin white comets meet in the middle; scan = green burst)"
+    echo "  8) breathe + bloom          (white strip breathes; scan = green bloom from center)"
     echo ""
-    read -p "Enter choice [1/2/3/4/5/6/7]: " LED_CHOICE
+    read -p "Enter choice [1/2/3/4/5/6/7/8]: " LED_CHOICE
 
     case "$LED_CHOICE" in
         2)
@@ -107,6 +108,9 @@ if [ $? -eq 0 ]; then
             ;;
         7)
             LED_SCRIPT="rfid_led_converge.py"
+            ;;
+        8)
+            LED_SCRIPT="rfid_led_breathe.py"
             ;;
         *)
             LED_SCRIPT="rfid_led.py"
