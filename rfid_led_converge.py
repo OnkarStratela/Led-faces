@@ -1,37 +1,36 @@
 """Bridge between the CAEN RFID reader (rfid_reader.c) and the WS2812 LED strip.
 
-"Constellation" — a starlight-twinkle idle with a green "supernova" scan, made
-for a matte-black bin chute.
+"Converge" — twin comets that meet in the middle, made for a matte-black chute.
 
 Rationale
 ---------
-The bin is matte black, so the IDLE background is left OFF. Instead of a single
-moving light, the strip becomes a quiet STARFIELD: random cool-white points
-softly twinkle in and out at varying speeds and peak brightness — like a
-luxury starlight headliner. It is calm, organic and reads as premium against
-black, while being clearly distinct from the comet/wave modes.
+The bin is matte black, so the IDLE background is left OFF. Two crisp
+full-white comets launch from the two ENDS of the strip and glide INWARD with
+eased acceleration, each trailing a soft cool-white tail. As they reach the
+CENTRE they collide in a brief luminous bloom, then sweep back out — a
+continuous, breathing convergence. The energy pulling toward the centre reads
+as "deposit here" and looks like a designed product light against black.
 
-The scan acknowledgment is a matching green SUPERNOVA: the whole field flashes
-to full green, holds, then SHATTERS — every pixel fading out at its own random
-rate — before the white starfield returns.
+The scan acknowledgment is a matching green version: both comets snap to green
+and SLAM to the centre into a full-green burst that holds, then dissolves back
+to black before the white convergence resumes.
 
 Two hard constraints are respected:
   1. Everything runs at full brightness. The WS2812 master brightness stays at
-     255 and the GPIO13 PWM LED at 1.0; the twinkle and fades are shaped purely
-     by per-pixel COLOUR, never by dimming the hardware. Star peaks reach pure
-     white (255, 255, 255) and the supernova peaks at pure green.
+     255 and the GPIO13 PWM LED at 1.0; the comets, tails and bloom are shaped
+     purely by per-pixel COLOUR, never by dimming the hardware. The comet heads
+     are pure white (255, 255, 255) and the burst peaks at pure green.
   2. A scan is always GREEN (#00FF00); only its SHAPE/animation is unique.
 
 Behaviour
 ---------
-* Idle (no tags being scanned): matte-black strip with cool-white stars softly
-  twinkling in and out at random, looping forever.
-* Every NEW unique tag reported by `rfid_reader` produces ONE green supernova:
-  a full-green flash that holds, then shatters into per-pixel fades back to
-  black.
-* If another new tag arrives during a supernova, it is cut short and a fresh
-  one starts. That way, scanning N unique containers in quick succession
-  produces N distinct green supernovas — a visual counter for the operator.
+* Idle (no tags being scanned): two cool-white comets converge to the centre
+  and sweep back out over an OFF strip, looping forever.
+* Every NEW unique tag reported by `rfid_reader` produces ONE green burst:
+  green comets slam to the centre, a full-green flash holds, then dissolves.
+* If another new tag arrives during a burst, it is cut short and a fresh one
+  starts. That way, scanning N unique containers in quick succession produces
+  N distinct green bursts — a visual counter for the operator.
 * Every tag line also prints "[LED-RFID] Tags scanned: N" so the running total
   is visible in the terminal.
 """
@@ -40,7 +39,6 @@ import atexit
 import math
 import os
 import queue
-import random
 import re
 import signal
 import subprocess
@@ -77,34 +75,30 @@ WHITE_HEX = "#FFFFFF"
 OFF_HEX   = "#000000"
 # ────────────────────────────────────────────────────────────
 
-# ── Starfield (idle) tuning ────────────────────────────────
-# Frame interval for the twinkle animation.
-STAR_FRAME_SECONDS = 0.03
-# Max number of stars lit at the same time.
-STAR_MAX_ACTIVE = 8
-# Per-frame probability of igniting a new star (while below STAR_MAX_ACTIVE).
-STAR_SPAWN_CHANCE = 0.35
-# Each star rises then falls over a random lifetime in this range (seconds).
-STAR_MIN_LIFETIME = 0.9
-STAR_MAX_LIFETIME = 2.2
-# Each star peaks at a random brightness in this range (1.0 = full white).
-STAR_MIN_PEAK = 0.45
-STAR_MAX_PEAK = 1.0
-# Cool-white bias: blue channel lingers a touch over red/green for an icy
-# star. 1.0 = neutral white; lower = cooler.
-STAR_COOL_EXPONENT = 0.78
+# ── Converge (idle) tuning ─────────────────────────────────
+# Seconds for one full converge-and-return cycle (edges → centre → edges).
+CONVERGE_PERIOD_SECONDS = 3.2
+# Frame interval. Small = smoother motion.
+CONVERGE_FRAME_SECONDS = 0.02
+# Width of each comet's soft tail, in pixels (gaussian sigma).
+CONVERGE_HALO_SIGMA = 1.8
+# Pixels whose computed intensity is below this stay fully OFF (clean black).
+CONVERGE_MIN_INTENSITY = 0.04
+# Cool-white bias of the tails (blue lingers): 1.0 = neutral, lower = cooler.
+CONVERGE_COOL_EXPONENT = 0.78
+# Extra glow added at the centre as the two comets meet (0 = none).
+CONVERGE_MEET_GLOW = 1.0
 # ────────────────────────────────────────────────────────────
 
-# ── Green supernova (scan acknowledgment) tuning ───────────
-# Seconds to flash up to full green.
-NOVA_FLASH_SECONDS = 0.12
+# ── Green burst (scan acknowledgment) tuning ───────────────
+# Seconds for the green comets to slam from the edges to the centre.
+BURST_IN_SECONDS = 0.26
 # Seconds the fully-green strip is held at the peak.
-NOVA_HOLD_SECONDS = 0.35
-# Per-pixel shatter fade-out durations are drawn from this range (seconds).
-NOVA_FADE_MIN_SECONDS = 0.30
-NOVA_FADE_MAX_SECONDS = 0.95
-# Frame interval for the supernova.
-NOVA_FRAME_SECONDS = 0.02
+BURST_HOLD_SECONDS = 0.42
+# Seconds for the green to dissolve smoothly back to black.
+BURST_FADE_SECONDS = 0.42
+# Frame interval for the burst.
+BURST_FRAME_SECONDS = 0.02
 # ────────────────────────────────────────────────────────────
 
 # Pattern that the C reader prints for every NEW unique tag.
@@ -167,29 +161,66 @@ def _ease(x: float) -> float:
     return x * x * (3.0 - 2.0 * x)
 
 
-def idle_constellation_until_tag(
+def _render_twin_comets(
+    strip: PixelStrip,
+    n: int,
+    left_pos: float,
+    right_pos: float,
+    two_sigma_sq: float,
+    meet_glow: float,
+    green: bool,
+) -> None:
+    """Render two comets (at `left_pos`/`right_pos`) plus a centre meet-glow.
+
+    `meet_glow` (0..1) adds brightness at the centre as the comets converge.
+    `green` selects the colour: pure green when True, cool white otherwise.
+    """
+    center = (n - 1) / 2.0
+    for i in range(n):
+        dl = i - left_pos
+        dr = i - right_pos
+        intensity = max(
+            math.exp(-(dl * dl) / two_sigma_sq),
+            math.exp(-(dr * dr) / two_sigma_sq),
+        )
+        if meet_glow > 0.0:
+            dc = i - center
+            intensity = max(
+                intensity,
+                meet_glow * math.exp(-(dc * dc) / two_sigma_sq),
+            )
+        if intensity < CONVERGE_MIN_INTENSITY:
+            strip.setPixelColor(i, 0)
+            continue
+        if green:
+            strip.setPixelColor(i, Color(0, int(round(255 * intensity)), 0))
+        else:
+            r = int(round(255 * intensity))
+            b = int(round(255 * (intensity ** CONVERGE_COOL_EXPONENT)))
+            strip.setPixelColor(i, Color(r, r, b))
+
+
+def idle_converge_until_tag(
     strip: PixelStrip,
     stop_event: "threading.Event",
     tag_events: "queue.Queue[float]",
 ) -> bool:
-    """Run the cool-white starfield twinkle over an OFF strip until a tag.
+    """Run the twin-comet convergence over an OFF strip until a tag.
 
-    Random pixels ignite and softly rise-then-fall over random lifetimes, so
-    the matte-black strip looks like a calm field of stars. Between every frame
-    we poll for a new tag event.
+    Two cool-white comets glide from the edges to the centre (eased), bloom as
+    they meet, then sweep back out — looping. Between every frame we poll for a
+    new tag event.
 
     Returns True if a new-tag event arrived (consumed from the queue, so the
-    caller should render a green supernova). Returns False if `stop_event` was
-    set.
+    caller should render a green burst). Returns False if `stop_event` was set.
     """
     n = strip.numPixels()
     if n <= 0:
         return False
 
-    active = [False] * n
-    age = [0.0] * n
-    lifetime = [0.0] * n
-    peak = [0.0] * n
+    center = (n - 1) / 2.0
+    two_sigma_sq = 2.0 * CONVERGE_HALO_SIGMA * CONVERGE_HALO_SIGMA
+    start = time.monotonic()
 
     while not stop_event.is_set():
         try:
@@ -198,58 +229,44 @@ def idle_constellation_until_tag(
         except queue.Empty:
             pass
 
-        # Maybe ignite a new star on a currently-dark pixel.
-        if sum(active) < STAR_MAX_ACTIVE and random.random() < STAR_SPAWN_CHANCE:
-            dark = [i for i in range(n) if not active[i]]
-            if dark:
-                i = random.choice(dark)
-                active[i] = True
-                age[i] = 0.0
-                lifetime[i] = random.uniform(STAR_MIN_LIFETIME, STAR_MAX_LIFETIME)
-                peak[i] = random.uniform(STAR_MIN_PEAK, STAR_MAX_PEAK)
+        # Eased oscillation 0→1→0: comets move in to the centre then back out.
+        t = time.monotonic() - start
+        p = 0.5 - 0.5 * math.cos(2.0 * math.pi * t / CONVERGE_PERIOD_SECONDS)
+        left_pos = p * center
+        right_pos = (n - 1) - p * center
+        # Centre glow grows as the comets close the final stretch (p → 1).
+        meet_glow = CONVERGE_MEET_GLOW * _ease((p - 0.7) / 0.3)
 
-        # Advance and render every pixel.
-        for i in range(n):
-            if not active[i]:
-                strip.setPixelColor(i, 0)
-                continue
-            age[i] += STAR_FRAME_SECONDS
-            if age[i] >= lifetime[i]:
-                active[i] = False
-                strip.setPixelColor(i, 0)
-                continue
-            # Smooth rise-then-fall over the star's lifetime.
-            shape = math.sin(math.pi * age[i] / lifetime[i])
-            intensity = peak[i] * shape
-            r = int(round(255 * intensity))
-            g = r
-            b = int(round(255 * (intensity ** STAR_COOL_EXPONENT)))
-            strip.setPixelColor(i, Color(r, g, b))
-
+        _render_twin_comets(
+            strip, n, left_pos, right_pos, two_sigma_sq, meet_glow, green=False
+        )
         strip.show()
-        time.sleep(STAR_FRAME_SECONDS)
+        time.sleep(CONVERGE_FRAME_SECONDS)
 
     return False
 
 
-def green_supernova_until_idle(
+def green_burst_until_idle(
     strip: PixelStrip,
     stop_event: "threading.Event",
     tag_events: "queue.Queue[float]",
 ) -> bool:
-    """Render the green "supernova" scan acknowledgment, looping on retriggers.
+    """Render the green "burst" scan acknowledgment, looping on retriggers.
 
-    One supernova = a full-green flash, a brief hold, then a SHATTER where each
-    pixel fades to black at its own random rate. If a new tag arrives at any
-    point, the current supernova is cut short and a fresh one starts, so rapid
-    scans produce distinct supernovas.
+    One burst = green comets slam from the edges to the centre, a full-green
+    flash holds, then the strip dissolves back to black. If a new tag arrives
+    at any point, the current burst is cut short and a fresh one starts, so
+    rapid scans produce distinct bursts.
 
-    Returns True when it finishes cleanly (caller resumes the starfield), or
+    Returns True when it finishes cleanly (caller resumes the convergence), or
     False if `stop_event` was set.
     """
     n = strip.numPixels()
     if n <= 0:
         return True
+
+    center = (n - 1) / 2.0
+    two_sigma_sq = 2.0 * CONVERGE_HALO_SIGMA * CONVERGE_HALO_SIGMA
 
     def _new_tag() -> bool:
         try:
@@ -261,7 +278,7 @@ def green_supernova_until_idle(
     while not stop_event.is_set():
         retrigger = False
 
-        # Phase 1 — flash up to full green.
+        # Phase 1 — green comets slam inward to the centre.
         start = time.monotonic()
         while True:
             if stop_event.is_set():
@@ -269,33 +286,36 @@ def green_supernova_until_idle(
             if _new_tag():
                 retrigger = True
                 break
-            e = (time.monotonic() - start) / NOVA_FLASH_SECONDS
+            e = (time.monotonic() - start) / BURST_IN_SECONDS
             if e >= 1.0:
                 break
-            level = _ease(e)
-            fill_strip(strip, Color(0, int(round(255 * level)), 0))
-            time.sleep(NOVA_FRAME_SECONDS)
+            p = _ease(e)
+            left_pos = p * center
+            right_pos = (n - 1) - p * center
+            meet_glow = _ease((p - 0.6) / 0.4)
+            _render_twin_comets(
+                strip, n, left_pos, right_pos, two_sigma_sq, meet_glow,
+                green=True,
+            )
+            strip.show()
+            time.sleep(BURST_FRAME_SECONDS)
         if retrigger:
             continue
 
         # Phase 2 — hold at full green.
         fill_strip(strip, Color(0, 255, 0))
-        hold_until = time.monotonic() + NOVA_HOLD_SECONDS
+        hold_until = time.monotonic() + BURST_HOLD_SECONDS
         while time.monotonic() < hold_until:
             if stop_event.is_set():
                 return False
             if _new_tag():
                 retrigger = True
                 break
-            time.sleep(NOVA_FRAME_SECONDS)
+            time.sleep(BURST_FRAME_SECONDS)
         if retrigger:
             continue
 
-        # Phase 3 — shatter: each pixel fades to black at its own random rate.
-        fade_dur = [
-            random.uniform(NOVA_FADE_MIN_SECONDS, NOVA_FADE_MAX_SECONDS)
-            for _ in range(n)
-        ]
+        # Phase 3 — dissolve: ease the whole strip from full green to black.
         start = time.monotonic()
         while True:
             if stop_event.is_set():
@@ -303,23 +323,16 @@ def green_supernova_until_idle(
             if _new_tag():
                 retrigger = True
                 break
-            t = time.monotonic() - start
-            all_dark = True
-            for i in range(n):
-                if t >= fade_dur[i]:
-                    strip.setPixelColor(i, 0)
-                else:
-                    level = 1.0 - _ease(t / fade_dur[i])
-                    all_dark = False
-                    strip.setPixelColor(i, Color(0, int(round(255 * level)), 0))
-            strip.show()
-            if all_dark:
+            e = (time.monotonic() - start) / BURST_FADE_SECONDS
+            if e >= 1.0:
                 break
-            time.sleep(NOVA_FRAME_SECONDS)
+            level = 1.0 - _ease(e)
+            fill_strip(strip, Color(0, int(round(255 * level)), 0))
+            time.sleep(BURST_FRAME_SECONDS)
         if retrigger:
             continue
 
-        # Clean finish: strip fully OFF, then back to the idle starfield.
+        # Clean finish: strip fully OFF, then back to the idle convergence.
         fill_strip(strip, 0)
         return True
 
@@ -369,31 +382,28 @@ def main() -> int:
     WHITE = hex_to_color(WHITE_HEX)
     OFF   = hex_to_color(OFF_HEX)
 
-    # Default idle state: strip OFF (the starfield takes over once the LED
+    # Default idle state: strip OFF (the convergence takes over once the LED
     # worker thread starts).
     fill_strip(strip, OFF)
 
     # One item is enqueued per new unique tag. The LED worker pops items and
-    # turns them into visible green supernovas.
+    # turns them into visible green bursts.
     tag_events: "queue.Queue[float]" = queue.Queue()
     stop_event = threading.Event()
 
     def led_worker() -> None:
-        """Render the constellation idle / GREEN-supernova behaviour described
-        in the module docstring."""
+        """Render the converge idle / GREEN-burst behaviour described in the
+        module docstring."""
         while not stop_event.is_set():
-            # Idle: run the starfield over an OFF strip until a new tag arrives
-            # (or we are told to stop).
-            got_tag = idle_constellation_until_tag(
-                strip, stop_event, tag_events
-            )
+            # Idle: run the convergence over an OFF strip until a new tag
+            # arrives (or we are told to stop).
+            got_tag = idle_converge_until_tag(strip, stop_event, tag_events)
             if not got_tag:
                 break  # stop_event was set
 
-            # New tag → green supernova acknowledgment (flash → hold →
-            # shatter), retriggering on additional tags. Returns when done or
-            # on stop.
-            if not green_supernova_until_idle(strip, stop_event, tag_events):
+            # New tag → green burst acknowledgment (slam in → hold → dissolve),
+            # retriggering on additional tags. Returns when done or on stop.
+            if not green_burst_until_idle(strip, stop_event, tag_events):
                 break  # stop_event was set
 
         # Shutdown: turn the strip off completely.
