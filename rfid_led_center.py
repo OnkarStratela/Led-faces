@@ -72,6 +72,9 @@ WHITE_FLASH_SECONDS = 0.10
 SLIDE_STEP_SECONDS = 0.12
 # Brief pause holding the completed sweep before the slide restarts.
 SLIDE_HOLD_SECONDS = 0.20
+# How many pixels stay lit behind each moving white front (length of the
+# "tail"). Smaller = shorter tail.
+SLIDE_TAIL_PIXELS = 3
 
 # Pattern that the C reader prints for every NEW unique tag.
 TAG_LINE_RE = re.compile(r"\[RFID\] TAG DETECTED:")
@@ -159,8 +162,17 @@ def idle_slide_until_tag(
                 return True
             except queue.Empty:
                 pass
+            # Light the two leading fronts...
             strip.setPixelColor(left, white)
             strip.setPixelColor(right, white)
+            # ...and switch off the pixels that have fallen out of the short
+            # tail behind each front, so only SLIDE_TAIL_PIXELS stay lit.
+            tail_left = left - SLIDE_TAIL_PIXELS
+            tail_right = right + SLIDE_TAIL_PIXELS
+            if tail_left >= 0:
+                strip.setPixelColor(tail_left, off)
+            if tail_right <= n - 1:
+                strip.setPixelColor(tail_right, off)
             strip.show()
             time.sleep(SLIDE_STEP_SECONDS)
             left += 1
