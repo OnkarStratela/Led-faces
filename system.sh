@@ -82,8 +82,9 @@ if [ $? -eq 0 ]; then
     echo "  1) rfid_led.py            (white snaps back after green)"
     echo "  2) white light pointing center (white wave slides to the middle over OFF background)"
     echo "  3) green wave on white      (green wave slides to the middle over WHITE background)"
+    echo "  4) red wave on white        (red wave slides to the middle over WHITE background)"
     echo ""
-    read -p "Enter choice [1/2/3]: " LED_CHOICE
+    read -p "Enter choice [1/2/3/4]: " LED_CHOICE
 
     case "$LED_CHOICE" in
         2)
@@ -91,6 +92,9 @@ if [ $? -eq 0 ]; then
             ;;
         3)
             LED_SCRIPT="rfid_led_green_wave.py"
+            ;;
+        4)
+            LED_SCRIPT="rfid_led_red_wave.py"
             ;;
         *)
             LED_SCRIPT="rfid_led.py"
