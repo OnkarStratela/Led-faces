@@ -80,13 +80,17 @@ if [ $? -eq 0 ]; then
     # Let the operator pick which LED behaviour to run.
     echo -e "${YELLOW}Select LED mode:${NC}"
     echo "  1) rfid_led.py            (white snaps back after green)"
-    echo "  2) white light pointing center (white slides from edges to the middle after green)"
+    echo "  2) white light pointing center (white wave slides to the middle over OFF background)"
+    echo "  3) green wave on white      (green wave slides to the middle over WHITE background)"
     echo ""
-    read -p "Enter choice [1/2]: " LED_CHOICE
+    read -p "Enter choice [1/2/3]: " LED_CHOICE
 
     case "$LED_CHOICE" in
         2)
             LED_SCRIPT="rfid_led_center.py"
+            ;;
+        3)
+            LED_SCRIPT="rfid_led_green_wave.py"
             ;;
         *)
             LED_SCRIPT="rfid_led.py"
