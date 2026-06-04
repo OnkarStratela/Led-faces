@@ -83,7 +83,7 @@ if [ $? -eq 0 ]; then
     echo "  2) white light pointing center (white wave slides to the middle over OFF background)"
     echo "  3) green wave on white      (green wave slides to the middle over WHITE background)"
     echo "  4) red wave on white        (red wave slides to the middle over WHITE background)"
-    echo "  5) aura (premium)           (soft breathing standby; centre bloom on each item)"
+    echo "  5) signature glide          (premium eased white light gliding on matte black)"
     echo ""
     read -p "Enter choice [1/2/3/4/5]: " LED_CHOICE
 
@@ -98,7 +98,7 @@ if [ $? -eq 0 ]; then
             LED_SCRIPT="rfid_led_red_wave.py"
             ;;
         5)
-            LED_SCRIPT="rfid_led_aura.py"
+            LED_SCRIPT="rfid_led_signature.py"
             ;;
         *)
             LED_SCRIPT="rfid_led.py"
