@@ -41,8 +41,29 @@ def main() -> int:
     signal.signal(signal.SIGINT, _stop)
 
     picam2 = Picamera2()
-    picam2.configure(picam2.create_preview_configuration(main={"size": (WINDOW_W, WINDOW_H)}))
+    # Read out the FULL sensor area (not a cropped centre region) so we get the
+    # widest field of view the lens allows, then scale it down to the preview
+    # window. This keeps the output/window resolution the same; only the field
+    # of view widens. Requesting a small size alone makes Picamera2 pick a
+    # cropped sensor mode, which looks "zoomed in".
+    try:
+        full_res = picam2.sensor_resolution
+        config = picam2.create_preview_configuration(
+            main={"size": (WINDOW_W, WINDOW_H)},
+            raw={"size": full_res},
+        )
+    except Exception:
+        config = picam2.create_preview_configuration(main={"size": (WINDOW_W, WINDOW_H)})
+    picam2.configure(config)
     picam2.start()
+
+    # Ensure the scaler uses the entire sensor array (full FOV), in case a
+    # previous run left a cropped ScalerCrop in place.
+    try:
+        full_w, full_h = picam2.sensor_resolution
+        picam2.set_controls({"ScalerCrop": (0, 0, full_w, full_h)})
+    except Exception:
+        pass
 
     # Anti-glare tuning: the bright LED strip blows out highlights, so bias the
     # auto-exposure down and meter on the centre. The camera still runs at full
