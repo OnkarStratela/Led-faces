@@ -125,19 +125,19 @@ if [ $? -eq 0 ]; then
     # down automatically when this script exits. This does not change any of
     # the RFID/LED behaviour below.
     echo -e "${YELLOW}Starting camera live stream window...${NC}"
-    # --qt-preview opens a NORMAL desktop window with a title bar, so it can be
-    # freely moved, resized and minimized (the default preview is a borderless
-    # fullscreen overlay that hides the terminal and can't be moved).
-    # -p X,Y,W,H sets the window's initial position/size (top-right by default).
+    # camera_preview.py opens a normal desktop window (move / resize / minimize).
+    # rpicam-hello's default preview is a fullscreen overlay; --qt-preview also
+    # fails without a display (e.g. SSH). Point DISPLAY at the Pi desktop.
     CAMERA_PID=""
-    if command -v rpicam-hello >/dev/null 2>&1; then
-        rpicam-hello -t 0 --qt-preview -p 1250,30,640,480 --info-text "Camera Live Stream" >/dev/null 2>&1 &
-        CAMERA_PID=$!
-    elif command -v libcamera-hello >/dev/null 2>&1; then
-        libcamera-hello -t 0 --qt-preview -p 1250,30,640,480 --info-text "Camera Live Stream" >/dev/null 2>&1 &
+    CAM_USER="${SUDO_USER:-$USER}"
+    export DISPLAY="${DISPLAY:-:0}"
+    export XAUTHORITY="${XAUTHORITY:-/home/${CAM_USER}/.Xauthority}"
+
+    if [ -f "camera_preview.py" ]; then
+        python3 camera_preview.py >/dev/null 2>&1 &
         CAMERA_PID=$!
     else
-        echo -e "${YELLOW}No camera preview tool (rpicam-hello/libcamera-hello) found; skipping live stream.${NC}"
+        echo -e "${YELLOW}camera_preview.py not found; skipping live stream.${NC}"
     fi
 
     if [ -n "$CAMERA_PID" ]; then
