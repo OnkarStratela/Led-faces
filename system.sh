@@ -125,15 +125,16 @@ if [ $? -eq 0 ]; then
     # down automatically when this script exits. This does not change any of
     # the RFID/LED behaviour below.
     echo -e "${YELLOW}Starting camera live stream window...${NC}"
-    # -p X,Y,W,H -> open the preview as a small window (not fullscreen) so the
-    #               terminal stays visible. Positioned toward the top-right.
-    #               Adjust the numbers if your screen resolution differs.
+    # --qt-preview opens a NORMAL desktop window with a title bar, so it can be
+    # freely moved, resized and minimized (the default preview is a borderless
+    # fullscreen overlay that hides the terminal and can't be moved).
+    # -p X,Y,W,H sets the window's initial position/size (top-right by default).
     CAMERA_PID=""
     if command -v rpicam-hello >/dev/null 2>&1; then
-        rpicam-hello -t 0 -p 1250,30,640,480 --info-text "Camera Live Stream" >/dev/null 2>&1 &
+        rpicam-hello -t 0 --qt-preview -p 1250,30,640,480 --info-text "Camera Live Stream" >/dev/null 2>&1 &
         CAMERA_PID=$!
     elif command -v libcamera-hello >/dev/null 2>&1; then
-        libcamera-hello -t 0 -p 1250,30,640,480 --info-text "Camera Live Stream" >/dev/null 2>&1 &
+        libcamera-hello -t 0 --qt-preview -p 1250,30,640,480 --info-text "Camera Live Stream" >/dev/null 2>&1 &
         CAMERA_PID=$!
     else
         echo -e "${YELLOW}No camera preview tool (rpicam-hello/libcamera-hello) found; skipping live stream.${NC}"
