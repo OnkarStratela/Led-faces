@@ -21,7 +21,37 @@ WINDOW_H = 480
 WINDOW_X = 1250
 WINDOW_Y = 30
 
+# Trackbars are integers, so each control is stored as an int slider position
+# and mapped to the camera's real (float) range. (slider_default, divisor,
+# offset): real_value = slider / divisor - offset.
+#   Brightness: -1.0 .. 1.0   (slider 0..200,  default -0.1 -> 90)
+#   Exposure  : -8.0 .. 8.0   (slider 0..160,  default -1.0 -> 70)
+#   Contrast  :  0.0 .. 3.0   (slider 0..300,  default  1.2 -> 120)
+BRIGHTNESS_MAX = 200
+BRIGHTNESS_DEFAULT = 90
+EXPOSURE_MAX = 160
+EXPOSURE_DEFAULT = 70
+CONTRAST_MAX = 300
+CONTRAST_DEFAULT = 120
+
+
+def _brightness_from_slider(v: int) -> float:
+    return v / 100.0 - 1.0
+
+
+def _exposure_from_slider(v: int) -> float:
+    return v / 10.0 - 8.0
+
+
+def _contrast_from_slider(v: int) -> float:
+    return v / 100.0
+
+
 _running = True
+
+
+def _noop(_v) -> None:
+    pass
 
 
 def _stop(*_args) -> None:
@@ -78,8 +108,32 @@ def main() -> int:
     cv2.resizeWindow(WINDOW_NAME, WINDOW_W, WINDOW_H)
     cv2.moveWindow(WINDOW_NAME, WINDOW_X, WINDOW_Y)
 
+    # Live adjustment sliders inside the same window. Drag these to change the
+    # camera in real time; they map to the real Brightness/Exposure/Contrast
+    # controls applied below.
+    cv2.createTrackbar("Brightness", WINDOW_NAME, BRIGHTNESS_DEFAULT, BRIGHTNESS_MAX, _noop)
+    cv2.createTrackbar("Exposure", WINDOW_NAME, EXPOSURE_DEFAULT, EXPOSURE_MAX, _noop)
+    cv2.createTrackbar("Contrast", WINDOW_NAME, CONTRAST_DEFAULT, CONTRAST_MAX, _noop)
+
+    last_settings = None
     try:
         while _running:
+            # Read slider positions and push them to the camera when changed.
+            try:
+                b = cv2.getTrackbarPos("Brightness", WINDOW_NAME)
+                e = cv2.getTrackbarPos("Exposure", WINDOW_NAME)
+                c = cv2.getTrackbarPos("Contrast", WINDOW_NAME)
+                settings = (b, e, c)
+                if settings != last_settings:
+                    picam2.set_controls({
+                        "Brightness": _brightness_from_slider(b),
+                        "ExposureValue": _exposure_from_slider(e),
+                        "Contrast": _contrast_from_slider(c),
+                    })
+                    last_settings = settings
+            except Exception:
+                pass
+
             frame = picam2.capture_array()
             bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             bgr = _reduce_glare(cv2, bgr, clahe)
@@ -94,20 +148,20 @@ def main() -> int:
 
 
 def _apply_antiglare_controls(picam2) -> None:
-    """Bias exposure/gain down so bright glare stops clipping to pure white."""
+    """Bias gain/metering so bright glare stops clipping to pure white.
+
+    Brightness, ExposureValue and Contrast are now driven live by the window
+    sliders (their defaults match the previous anti-glare values), so they are
+    intentionally not set here.
+    """
     try:
         from libcamera import controls as libcontrols
     except Exception:
         libcontrols = None
 
     ctrls = {
-        # Pull the overall exposure target down (negative = darker).
-        "ExposureValue": -1.0,
         # Cap analogue gain so dark areas aren't amplified into more glare.
         "AnalogueGain": 1.0,
-        # Slightly reduce brightness / raise contrast for clarity.
-        "Brightness": -0.1,
-        "Contrast": 1.2,
     }
     if libcontrols is not None:
         try:
