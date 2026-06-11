@@ -118,6 +118,38 @@ if [ $? -eq 0 ]; then
     esac
 
     echo ""
+
+    # ---- Camera live stream (minimizable preview window) -----------------
+    # Runs alongside everything else. Launched in the background as the
+    # current (non-root) user so it can reach the desktop display, and torn
+    # down automatically when this script exits. This does not change any of
+    # the RFID/LED behaviour below.
+    echo -e "${YELLOW}Starting camera live stream window...${NC}"
+    CAMERA_PID=""
+    if command -v rpicam-hello >/dev/null 2>&1; then
+        rpicam-hello -t 0 --info-text "Camera Live Stream" >/dev/null 2>&1 &
+        CAMERA_PID=$!
+    elif command -v libcamera-hello >/dev/null 2>&1; then
+        libcamera-hello -t 0 --info-text "Camera Live Stream" >/dev/null 2>&1 &
+        CAMERA_PID=$!
+    else
+        echo -e "${YELLOW}No camera preview tool (rpicam-hello/libcamera-hello) found; skipping live stream.${NC}"
+    fi
+
+    if [ -n "$CAMERA_PID" ]; then
+        echo -e "${GREEN}Camera live stream started (window can be minimized).${NC}"
+    fi
+
+    # Ensure the camera window is closed when this script stops (e.g. Ctrl+C).
+    cleanup_camera() {
+        if [ -n "$CAMERA_PID" ] && kill -0 "$CAMERA_PID" 2>/dev/null; then
+            kill "$CAMERA_PID" 2>/dev/null
+        fi
+    }
+    trap cleanup_camera EXIT INT TERM
+    # ----------------------------------------------------------------------
+
+    echo ""
     echo -e "${GREEN}Starting RFID reader with LED feedback (${LED_SCRIPT})...${NC}"
     echo -e "${YELLOW}(LEDs will turn GREEN whenever a new unique tag is scanned)${NC}"
     echo ""
