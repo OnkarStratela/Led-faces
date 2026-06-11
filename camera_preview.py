@@ -44,6 +44,15 @@ def main() -> int:
     picam2.configure(picam2.create_preview_configuration(main={"size": (WINDOW_W, WINDOW_H)}))
     picam2.start()
 
+    # Anti-glare tuning: the bright LED strip blows out highlights, so bias the
+    # auto-exposure down and meter on the centre. The camera still runs at full
+    # capability (AE/AWB stay on) but the image stops clipping to white.
+    _apply_antiglare_controls(picam2)
+
+    # CLAHE on the luminance channel locally recovers detail in the glare
+    # without darkening the whole frame.
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW_NAME, WINDOW_W, WINDOW_H)
     cv2.moveWindow(WINDOW_NAME, WINDOW_X, WINDOW_Y)
@@ -51,7 +60,9 @@ def main() -> int:
     try:
         while _running:
             frame = picam2.capture_array()
-            cv2.imshow(WINDOW_NAME, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            bgr = _reduce_glare(cv2, bgr, clahe)
+            cv2.imshow(WINDOW_NAME, bgr)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
@@ -59,6 +70,49 @@ def main() -> int:
         cv2.destroyAllWindows()
 
     return 0
+
+
+def _apply_antiglare_controls(picam2) -> None:
+    """Bias exposure/gain down so bright glare stops clipping to pure white."""
+    try:
+        from libcamera import controls as libcontrols
+    except Exception:
+        libcontrols = None
+
+    ctrls = {
+        # Pull the overall exposure target down (negative = darker).
+        "ExposureValue": -1.0,
+        # Cap analogue gain so dark areas aren't amplified into more glare.
+        "AnalogueGain": 1.0,
+        # Slightly reduce brightness / raise contrast for clarity.
+        "Brightness": -0.1,
+        "Contrast": 1.2,
+    }
+    if libcontrols is not None:
+        try:
+            # Centre-weighted metering ignores bright edges/glare hotspots.
+            ctrls["AeMeteringMode"] = libcontrols.AeMeteringModeEnum.CentreWeighted
+        except Exception:
+            pass
+
+    # Apply best-effort; unsupported keys must not break the preview.
+    for key, value in ctrls.items():
+        try:
+            picam2.set_controls({key: value})
+        except Exception:
+            pass
+
+
+def _reduce_glare(cv2, bgr, clahe):
+    """Recover highlight detail locally and gently roll off near-white pixels."""
+    try:
+        lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        l = clahe.apply(l)
+        lab = cv2.merge((l, a, b))
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    except Exception:
+        return bgr
 
 
 if __name__ == "__main__":
